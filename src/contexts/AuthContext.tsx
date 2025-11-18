@@ -1,4 +1,3 @@
-// Authentication context
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
 
@@ -26,30 +25,39 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false); // Changed to false to prevent auth check
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Skip auth check for demo mode to prevent 429 errors
+    // Check for existing auth token
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      // For demo purposes, create a mock user
+      const mockUser = {
+        id: 'demo-user-' + Date.now(),
+        email: 'demo@storymaker.app',
+        name: 'Demo User',
+        picture: undefined,
+        createdAt: new Date()
+      };
+      setUser(mockUser);
+    }
     setLoading(false);
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Sign in failed');
-      }
-
-      const { token, user: userData } = await response.json();
-      localStorage.setItem('authToken', token);
-      setUser(userData);
+      // Demo sign-in - just create mock user
+      const mockUser = {
+        id: 'email-user-' + Date.now(),
+        email,
+        name: email.split('@')[0],
+        picture: undefined,
+        createdAt: new Date()
+      };
+      
+      const mockToken = 'email-token-' + Date.now();
+      localStorage.setItem('authToken', mockToken);
+      setUser(mockUser);
     } catch (error) {
       console.error('Sign in error:', error);
       throw error;
@@ -58,78 +66,44 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const signInWithGoogle = async () => {
     try {
-      // Call the backend API to initiate Google OAuth
-      const response = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Google sign in failed');
-      }
-
-      const data = await response.json();
+      // Demo Google sign-in - simulate successful OAuth
+      const mockUser = {
+        id: 'google-user-' + Date.now(),
+        email: 'google.demo@storymaker.app',
+        name: 'Demo Google User',
+        picture: undefined,
+        createdAt: new Date()
+      };
       
-      // Handle the response based on the backend implementation
-      if (data.token && data.user) {
-        // Mock successful OAuth response
-        localStorage.setItem('authToken', data.token);
-        setUser(data.user);
-      } else if (data.redirectUrl) {
-        // If backend returns a redirect URL, use it
-        window.location.href = data.redirectUrl;
-      } else {
-        // Fallback: simulate successful OAuth for demo
-        const mockUser = {
-          id: 'google-user-' + Date.now(),
-          email: 'demo@google.com',
-          name: 'Demo Google User',
-          picture: undefined,
-          createdAt: new Date()
-        };
-        
-        const mockToken = 'google-demo-token-' + Date.now();
-        localStorage.setItem('authToken', mockToken);
-        setUser(mockUser);
-      }
+      const mockToken = 'google-demo-token-' + Date.now();
+      localStorage.setItem('authToken', mockToken);
+      setUser(mockUser);
+      
+      console.log('Demo Google sign-in successful');
     } catch (error) {
       console.error('Google sign in error:', error);
       
-      // Fallback: for demo purposes, simulate successful login
-      try {
-        const mockUser = {
-          id: 'google-user-' + Date.now(),
-          email: 'demo@google.com',
-          name: 'Demo Google User',
-          picture: undefined,
-          createdAt: new Date()
-        };
-        
-        const mockToken = 'google-demo-token-' + Date.now();
-        localStorage.setItem('authToken', mockToken);
-        setUser(mockUser);
-      } catch (fallbackError) {
-        console.error('Fallback sign in failed:', fallbackError);
-        throw error;
-      }
+      // Fallback: create demo user anyway
+      const mockUser = {
+        id: 'google-fallback-' + Date.now(),
+        email: 'google.demo@storymaker.app',
+        name: 'Demo Google User',
+        picture: undefined,
+        createdAt: new Date()
+      };
+      
+      const mockToken = 'google-fallback-token-' + Date.now();
+      localStorage.setItem('authToken', mockToken);
+      setUser(mockUser);
     }
   };
 
   const signOut = async () => {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        },
-      });
-    } catch (error) {
-      console.error('Sign out error:', error);
-    } finally {
       localStorage.removeItem('authToken');
       setUser(null);
+    } catch (error) {
+      console.error('Sign out error:', error);
     }
   };
 

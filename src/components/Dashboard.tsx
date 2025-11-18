@@ -5,6 +5,7 @@ import { Story } from '../types';
 import { PlusIcon, BookOpenIcon, CogIcon, UserIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { AudioPlayer } from './AudioPlayer';
 import LoadingSpinner from './LoadingSpinner';
+import toast from 'react-hot-toast';
 
 const Dashboard: React.FC = () => {
   const { user, signOut } = useAuth();
@@ -20,73 +21,46 @@ const Dashboard: React.FC = () => {
 
   const fetchStories = async () => {
     try {
-      // Mock data for now - replace with actual API call
-      const mockStories: Story[] = [
-        {
-          id: '1',
-          title: 'The Enchanted Forest',
-          content: 'Once upon a time, in a magical forest where the trees whispered ancient secrets and the wind carried melodies of forgotten spells, there lived a young girl named Luna. She had always felt different from the other villagers, sensing whispers in the wind and seeing shadows dance when no one else was looking.',
-          genre: 'fantasy',
-          length: 'medium',
-          prompt: 'A story about a magical forest with talking animals',
-          creatorId: user?.id || '',
-          creatorName: user?.name || '',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          isPublic: true,
-          wordCount: 1250,
-          estimatedReadingTime: 5,
-          views: 45,
-          likes: 12,
-          hasAudio: false,
-          audioUrl: undefined,
-          hasStorybook: true,
-          storybookId: 'sb-1'
-        },
-        {
-          id: '2',
-          title: 'Space Adventure',
-          content: 'Captain Sarah stared at the alien planet below, her heart racing with excitement and fear. After three years of traveling through the vast emptiness of space, they had finally arrived at their destination. The planet was unlike anything in their databases - a world of purple forests and crystal mountains.',
-          genre: 'sci-fi',
-          length: 'short',
-          prompt: 'A sci-fi adventure set in space',
-          creatorId: user?.id || '',
-          creatorName: user?.name || '',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          isPublic: true,
-          wordCount: 850,
-          estimatedReadingTime: 3,
-          views: 23,
-          likes: 8,
-          hasAudio: false,
-          audioUrl: undefined,
-          hasStorybook: false
-        },
-        {
-          id: '3',
-          title: 'The Mystery Mansion',
-          content: 'Detective Marcus walked up the creaky steps of Blackwood Manor, his flashlight cutting through the darkness. The locals had warned him about this place - abandoned for decades, haunted by the ghost of its former owner. But Marcus didn\'t believe in ghosts. He believed in facts, evidence, and truth.',
-          genre: 'mystery',
-          length: 'medium',
-          prompt: 'A detective story set in a haunted mansion',
-          creatorId: user?.id || '',
-          creatorName: user?.name || '',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          isPublic: true,
-          wordCount: 1100,
-          estimatedReadingTime: 4,
-          views: 67,
-          likes: 23,
-          hasAudio: false,
-          audioUrl: undefined,
-          hasStorybook: false
-        }
-      ];
-      setStories(mockStories);
+      setLoading(true);
+      
+      // Get stored stories from localStorage (for demo purposes)
+      const storedStories = localStorage.getItem('userStories');
+      let userStories: Story[] = [];
+      
+      if (storedStories) {
+        userStories = JSON.parse(storedStories);
+      } else {
+        // Start with some demo stories if none exist
+        userStories = [
+          {
+            id: 'demo-1',
+            title: 'The Enchanted Forest',
+            content: 'Once upon a time, in a magical forest where the trees whispered ancient secrets and the wind carried melodies of forgotten spells, there lived a young girl named Luna. She had always felt different from the other villagers, sensing whispers in the wind and seeing shadows dance when no one else was looking.',
+            genre: 'fantasy',
+            length: 'medium',
+            prompt: 'A story about a magical forest with talking animals',
+            creatorId: user?.id || 'demo-user',
+            creatorName: user?.name || 'Demo User',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isPublic: true,
+            wordCount: 1250,
+            estimatedReadingTime: 5,
+            views: 45,
+            likes: 12,
+            hasAudio: false,
+            audioUrl: undefined,
+            hasStorybook: true,
+            storybookId: 'sb-1'
+          }
+        ];
+        localStorage.setItem('userStories', JSON.stringify(userStories));
+      }
+      
+      setStories(userStories);
     } catch (error) {
       console.error('Failed to fetch stories:', error);
+      toast.error('Failed to load stories');
     } finally {
       setLoading(false);
     }
@@ -207,6 +181,16 @@ const Dashboard: React.FC = () => {
             <p className="mt-1 text-sm text-gray-500">
               {searchTerm || filterGenre ? 'Try adjusting your search or filters.' : 'Get started by creating a new story.'}
             </p>
+            {!searchTerm && !filterGenre && (
+              <div className="mt-6">
+                <button
+                  onClick={handleCreateStory}
+                  className="btn-primary"
+                >
+                  Create Your First Story
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

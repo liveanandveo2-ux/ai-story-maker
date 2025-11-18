@@ -1,0 +1,61 @@
+  const generateStory = async () => {
+    if (!formData.prompt.trim()) {
+      toast.error('Please enter a story prompt');
+      return;
+    }
+
+    setIsGenerating(true);
+    
+    try {
+      // Simulate API call to generate story
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Generate story data
+      const title = generateTitle(formData.prompt, formData.genre);
+      const content = generateStoryContent(formData.prompt, formData.genre, formData.length);
+      const wordCount = getWordCount(formData.length);
+      const estimatedReadingTime = getEstimatedReadingTime(formData.length);
+      
+      // Create story object
+      const newStory: Story = {
+        id: 'story-' + Date.now(),
+        title,
+        content,
+        genre: formData.genre,
+        length: formData.length,
+        prompt: formData.prompt,
+        creatorId: user?.id || 'anonymous',
+        creatorName: user?.name || 'Anonymous',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isPublic: true,
+        wordCount,
+        estimatedReadingTime,
+        views: 0,
+        likes: 0,
+        hasAudio: !!formData.audioSettings.voiceType,
+        audioUrl: undefined,
+        hasStorybook: false,
+        storybookId: undefined
+      };
+
+      // Save story to localStorage
+      const existingStories = localStorage.getItem('userStories');
+      const stories = existingStories ? JSON.parse(existingStories) : [];
+      stories.unshift(newStory); // Add new story at the beginning
+      localStorage.setItem('userStories', JSON.stringify(stories));
+
+      toast.success('Story generated successfully!');
+      
+      // Navigate to dashboard with success message
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Story generation failed:', error);
+      toast.error('Failed to generate story. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };

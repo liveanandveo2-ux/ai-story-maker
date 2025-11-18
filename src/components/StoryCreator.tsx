@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { StoryGenre, StoryLength, AudioSettings } from '../types';
+import { Story, StoryGenre, StoryLength, AudioSettings } from '../types';
 import { 
   ArrowLeftIcon, 
   SparklesIcon, 
@@ -170,20 +170,47 @@ const StoryCreator: React.FC = () => {
       // Simulate API call to generate story
       await new Promise(resolve => setTimeout(resolve, 3000));
       
-      // Mock story generation response
-      const storyData = {
-        title: generateTitle(formData.prompt, formData.genre),
-        content: generateStoryContent(formData.prompt, formData.genre, formData.length),
+      // Generate story data
+      const title = generateTitle(formData.prompt, formData.genre);
+      const content = generateStoryContent(formData.prompt, formData.genre, formData.length);
+      const wordCount = getWordCount(formData.length);
+      const estimatedReadingTime = getEstimatedReadingTime(formData.length);
+      
+      // Create story object
+      const newStory: Story = {
+        id: 'story-' + Date.now(),
+        title,
+        content,
         genre: formData.genre,
         length: formData.length,
         prompt: formData.prompt,
-        wordCount: getWordCount(formData.length),
-        estimatedReadingTime: getEstimatedReadingTime(formData.length),
-        audioSettings: formData.audioSettings
+        creatorId: user?.id || 'anonymous',
+        creatorName: user?.name || 'Anonymous',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isPublic: true,
+        wordCount,
+        estimatedReadingTime,
+        views: 0,
+        likes: 0,
+        hasAudio: !!formData.audioSettings.voiceType,
+        audioUrl: undefined,
+        hasStorybook: false,
+        storybookId: undefined
       };
 
+      // Save story to localStorage
+      const existingStories = localStorage.getItem('userStories');
+      const stories = existingStories ? JSON.parse(existingStories) : [];
+      stories.unshift(newStory); // Add new story at the beginning
+      localStorage.setItem('userStories', JSON.stringify(stories));
+
       toast.success('Story generated successfully!');
-      navigate('/dashboard');
+      
+      // Navigate to dashboard with success message
+      setTimeout(() => {
+        navigate('/dashboard');
+      }, 1500);
       
     } catch (error) {
       console.error('Story generation failed:', error);
