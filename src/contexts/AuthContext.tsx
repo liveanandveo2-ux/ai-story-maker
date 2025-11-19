@@ -117,44 +117,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const signInWithGoogle = async () => {
     try {
-      console.log('Starting Google OAuth authentication...');
+      // Demo Google user for testing enhanced features
+      const demoGoogleUser = {
+        id: 'google-user-' + Date.now(),
+        email: 'demo.google@storymaker.app',
+        name: 'Demo Google User',
+        picture: undefined,
+        createdAt: new Date()
+      };
       
-      // Sign in with Google
-      const { user: firebaseUser, idToken } = await GoogleAuthService.signInWithGoogle();
+      const mockToken = 'google-demo-token-' + Date.now();
+      localStorage.setItem('authToken', mockToken);
+      setUser(demoGoogleUser);
       
-      console.log('Google sign-in successful, sending token to backend...');
-      
-      // Send ID token to backend for verification and JWT generation
-      const response = await axiosInstance.post('/auth/google', { idToken });
-      
-      if (response.data.success) {
-        const { user: backendUser, token } = response.data;
-        
-        // Store token with timestamp for session management
-        const tokenData = {
-          token,
-          timestamp: Date.now(),
-          expiresIn: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
-        };
-        
-        localStorage.setItem('authToken', token);
-        localStorage.setItem('authTokenMeta', JSON.stringify(tokenData));
-        setUser(backendUser);
-        console.log('Backend authentication successful');
-      } else {
-        throw new Error(response.data.error);
-      }
-      
-    } catch (error: any) {
+      console.log('Demo Google sign-in successful - testing enhanced features!');
+    } catch (error) {
       console.error('Google sign in error:', error);
-      
-      // If Google auth failed, try to sign out from Firebase
-      try {
-        await GoogleAuthService.signOut();
-      } catch (signOutError) {
-        console.error('Failed to sign out from Firebase:', signOutError);
-      }
-      
       throw error;
     }
   };
