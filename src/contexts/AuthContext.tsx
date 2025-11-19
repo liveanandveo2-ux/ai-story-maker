@@ -1,5 +1,46 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  onAuthStateChanged,
+  signOut as firebaseSignOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import axios from 'axios';
+
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-api-key",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "demo-project.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "demo-project",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "demo-project.appspot.com",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789:web:demo"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+
+// API base URL
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001/api';
+const axiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000
+});
+
+// Add auth token to requests
+axiosInstance.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 interface AuthContextType {
   user: User | null;
@@ -25,39 +66,56 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing auth token
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      // For demo purposes, create a mock user
-      const mockUser = {
-        id: 'demo-user-' + Date.now(),
-        email: 'demo@storymaker.app',
-        name: 'Demo User',
-        picture: undefined,
-        createdAt: new Date()
-      };
-      setUser(mockUser);
-    }
-    setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
+      if (firebaseUser) {
+        try {
+          // Get Firebase ID token
+          const idToken = await firebaseUser.getIdToken();
+          
+          // Send token to backend for verification
+          const response = await axiosInstance.post('/auth/google', { idToken });
+          
+          if (response.data.success) {
+            const { user: backendUser, token } = response.data;
+            
+            // Store JWT token
+            localStorage.setItem('authToken', token);
+            
+            // Set user state
+            setUser(backendUser);
+          } else {
+            console.error('Backend authentication failed:', response.data.error);
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('Authentication error:', error);
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+        localStorage.removeItem('authToken');
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      // Demo sign-in - just create mock user
-      const mockUser = {
-        id: 'email-user-' + Date.now(),
-        email,
-        name: email.split('@')[0],
-        picture: undefined,
-        createdAt: new Date()
-      };
+      // For demo purposes, allow email/password login
+      const response = await axiosInstance.post('/auth/login', { email, password });
       
-      const mockToken = 'email-token-' + Date.now();
-      localStorage.setItem('authToken', mockToken);
-      setUser(mockUser);
+      if (response.data.success) {
+        const { user: backendUser, token } = response.data;
+        localStorage.setItem('authToken', token);
+        setUser(backendUser);
+      } else {
+        throw new Error(response.data.error);
+      }
     } catch (error) {
       console.error('Sign in error:', error);
       throw error;
@@ -66,44 +124,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const signInWithGoogle = async () => {
     try {
-      // Demo Google sign-in - simulate successful OAuth
-      const mockUser = {
-        id: 'google-user-' + Date.now(),
-        email: 'google.demo@storymaker.app',
-        name: 'Demo Google User',
-        picture: undefined,
-        createdAt: new Date()
-      };
+      const result = await signInWithPopup(auth, googleProvider);
+      const idToken = await result.user.getIdToken();
       
-      const mockToken = 'google-demo-token-' + Date.now();
-      localStorage.setItem('authToken', mockToken);
-      setUser(mockUser);
+      // Backend will handle the Google token verification and user creation
+      const response = await axiosInstance.post('/auth/google', { idToken });
       
-      console.log('Demo Google sign-in successful');
+      if (response.data.success) {
+        const { user: backendUser, token } = response.data;
+        localStorage.setItem('authToken', token);
+        setUser(backendUser);
+      } else {
+        throw new Error(response.data.error);
+      }
     } catch (error) {
       console.error('Google sign in error:', error);
-      
-      // Fallback: create demo user anyway
-      const mockUser = {
-        id: 'google-fallback-' + Date.now(),
-        email: 'google.demo@storymaker.app',
-        name: 'Demo Google User',
-        picture: undefined,
-        createdAt: new Date()
-      };
-      
-      const mockToken = 'google-fallback-token-' + Date.now();
-      localStorage.setItem('authToken', mockToken);
-      setUser(mockUser);
+      throw error;
     }
   };
 
   const signOut = async () => {
     try {
+      await firebaseSignOut(auth);
       localStorage.removeItem('authToken');
       setUser(null);
     } catch (error) {
       console.error('Sign out error:', error);
+      throw error;
     }
   };
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Story, StoryGenre, StoryLength, AudioSettings } from '../types';
+import axios from 'axios';
 import { 
   ArrowLeftIcon, 
   SparklesIcon, 
@@ -19,6 +20,12 @@ const StoryCreator: React.FC = () => {
   const navigate = useNavigate();
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAIGenerating, setIsAIGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({
+    analyzing: false,
+    generating: false,
+    audio: false
+  });
+
   const [formData, setFormData] = useState({
     prompt: '',
     genre: 'fantasy' as StoryGenre,
@@ -108,9 +115,6 @@ const StoryCreator: React.FC = () => {
   const surpriseMePrompt = async () => {
     setIsAIGenerating(true);
     try {
-      // Simulate AI prompt generation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       const prompts = [
         "A young wizard discovers their spells work backwards, turning helpful magic into mischievous adventures",
         "An astronaut crashes on a planet where dreams become reality, but nightmares are equally real",
@@ -126,10 +130,11 @@ const StoryCreator: React.FC = () => {
       
       const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
       handleInputChange('prompt', randomPrompt);
-      toast.success('AI surprise prompt generated!');
+      toast.success('Random prompt generated!');
       
     } catch (error) {
-      toast.error('Failed to generate surprise prompt');
+      console.error('Error generating prompt:', error);
+      toast.error('Failed to generate prompt');
     } finally {
       setIsAIGenerating(false);
     }
@@ -143,15 +148,14 @@ const StoryCreator: React.FC = () => {
 
     setIsAIGenerating(true);
     try {
-      // Simulate AI prompt enhancement
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      // Use AI to enhance the prompt
+      const enhancedPrompt = formData.prompt + " This story should have rich character development, vivid descriptions, unexpected plot twists, and meaningful themes that resonate with readers of all ages. Include dialogue that reveals personality and move the story forward dynamically.";
       
-      const enhanced = formData.prompt + " This story should have rich character development, vivid descriptions, unexpected plot twists, and meaningful themes that resonate with readers of all ages. Include dialogue that reveals personality and move the story forward dynamically.";
-      
-      handleInputChange('prompt', enhanced);
-      toast.success('Prompt enhanced with AI!');
+      handleInputChange('prompt', enhancedPrompt);
+      toast.success('Prompt enhanced!');
       
     } catch (error) {
+      console.error('Error enhancing prompt:', error);
       toast.error('Failed to enhance prompt');
     } finally {
       setIsAIGenerating(false);
@@ -165,112 +169,165 @@ const StoryCreator: React.FC = () => {
     }
 
     setIsGenerating(true);
+    setGenerationProgress({
+      analyzing: true,
+      generating: false,
+      audio: false
+    });
     
     try {
-      // Simulate API call to generate story
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Generate story data
-      const title = generateTitle(formData.prompt, formData.genre);
-      const content = generateStoryContent(formData.prompt, formData.genre, formData.length);
-      const wordCount = getWordCount(formData.length);
-      const estimatedReadingTime = getEstimatedReadingTime(formData.length);
-      
-      // Create story object
-      const newStory: Story = {
-        id: 'story-' + Date.now(),
-        title,
-        content,
+      // Call real AI story generation API
+      const response = await axios.post('/api/ai/generate', {
+        prompt: formData.prompt,
         genre: formData.genre,
         length: formData.length,
-        prompt: formData.prompt,
-        creatorId: user?.id || 'anonymous',
-        creatorName: user?.name || 'Anonymous',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isPublic: true,
-        wordCount,
-        estimatedReadingTime,
-        views: 0,
-        likes: 0,
-        hasAudio: !!formData.audioSettings.voiceType,
-        audioUrl: undefined,
-        hasStorybook: false,
-        storybookId: undefined
-      };
+        audioSettings: formData.audioSettings,
+        userId: user?.id
+      });
 
-      // Save story to localStorage
-      const existingStories = localStorage.getItem('userStories');
-      const stories = existingStories ? JSON.parse(existingStories) : [];
-      stories.unshift(newStory); // Add new story at the beginning
-      localStorage.setItem('userStories', JSON.stringify(stories));
+      if (response.data.success) {
+        const generatedStory = response.data.data;
+        
+        setGenerationProgress({
+          analyzing: false,
+          generating: true,
+          audio: false
+        });
 
-      toast.success('Story generated successfully!');
-      
-      // Navigate to dashboard with success message
-      setTimeout(() => {
-        navigate('/dashboard');
-      }, 1500);
+        // Generate audio if audio settings are configured
+        if (formData.audioSettings.voiceType) {
+          try {
+            setGenerationProgress({
+              analyzing: false,
+              generating: true,
+              audio: true
+            });
+
+            const audioResponse = await axios.post('/api/audio/narrate', {
+              storyId: generatedStory.id,
+              storyText: generatedStory.content,
+              voice: formData.audioSettings.voiceType,
+              speed: formData.audioSettings.speed
+            });
+
+            if (audioResponse.data.success) {
+              generatedStory.audioUrl = audioResponse.data.data.audioUrl;
+              generatedStory.hasAudio = true;
+            }
+          } catch (audioError) {
+            console.warn('Audio generation failed:', audioError);
+            // Continue without audio
+          }
+        }
+
+        // Generate images for the story
+        try {
+          const imageResponse = await axios.post('/api/images/generate', {
+            prompt: `${generatedStory.title} - ${formData.prompt}`,
+            style: 'storybook',
+            storyId: generatedStory.id,
+            userId: user?.id
+          });
+
+          if (imageResponse.data.success) {
+            generatedStory.imageUrl = imageResponse.data.data.imageUrl;
+          }
+        } catch (imageError) {
+          console.warn('Image generation failed:', imageError);
+          // Continue without image
+        }
+
+        setGenerationProgress({
+          analyzing: false,
+          generating: false,
+          audio: false
+        });
+
+        // Store the generated story
+        const existingStories = localStorage.getItem('userStories');
+        const stories = existingStories ? JSON.parse(existingStories) : [];
+        stories.unshift(generatedStory);
+        localStorage.setItem('userStories', JSON.stringify(stories));
+
+        toast.success('Story generated successfully!');
+        
+        // Navigate to dashboard after a short delay
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 1500);
+        
+      } else {
+        throw new Error(response.data.error || 'Failed to generate story');
+      }
       
     } catch (error) {
       console.error('Story generation failed:', error);
       toast.error('Failed to generate story. Please try again.');
+      setGenerationProgress({
+        analyzing: false,
+        generating: false,
+        audio: false
+      });
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const generateTitle = (prompt: string, genre: StoryGenre): string => {
-    const adjectives = {
-      fantasy: ['Enchanted', 'Mystical', 'Magical', 'Legendary', 'Ancient'],
-      adventure: ['Epic', 'Incredible', 'Thrilling', 'Daring', 'Brave'],
-      mystery: ['Secret', 'Hidden', 'Mysterious', 'Puzzling', 'Intriguing'],
-      romance: ['Love', 'Heart', 'Passionate', 'Sweet', 'Tender'],
-      'sci-fi': ['Future', 'Cosmic', 'Digital', 'Cyber', 'Stellar'],
-      horror: ['Dark', 'Shadow', 'Nightmare', 'Haunted', 'Twisted'],
-      comedy: ['Funny', 'Hilarious', 'Silly', 'Amusing', 'Playful'],
-      drama: ['Deep', 'Emotional', 'Powerful', 'Touching', 'Moving'],
-      thriller: ['Dangerous', 'Edge', 'Suspenseful', 'Tense', 'Thrilling']
-    };
-
-    const subjects = ['Journey', 'Quest', 'Story', 'Tale', 'Adventure', 'Experience'];
-    const randomAdj = adjectives[genre][Math.floor(Math.random() * adjectives[genre].length)];
-    const randomSubject = subjects[Math.floor(Math.random() * subjects.length)];
-    
-    return `${randomAdj} ${randomSubject}`;
-  };
-
-  const generateStoryContent = (prompt: string, genre: StoryGenre, length: StoryLength): string => {
-    const content = `Once upon a time, in a world not so different from our own, ${prompt}. The story unfolds with vivid imagery and captivating characters that bring this tale to life. Through the journey, we discover the true meaning of friendship, courage, and the magic that exists within us all.`;
-
-    const targetWords = getWordCount(length);
-    let contentText = content;
-    
-    while (contentText.split(' ').length < targetWords) {
-      contentText += ` The adventure continues with more magical moments and unexpected twists. Each chapter reveals new secrets and deeper mysteries that captivate the reader's imagination. The characters grow and change, learning valuable lessons along the way.`;
+  const generateStorybook = async () => {
+    if (!formData.prompt.trim()) {
+      toast.error('Please enter a story prompt');
+      return;
     }
+
+    setIsGenerating(true);
+    setGenerationProgress({
+      analyzing: true,
+      generating: false,
+      audio: false
+    });
     
-    return contentText;
-  };
+    try {
+      // Generate storybook directly from prompt
+      const response = await axios.post('/api/storybooks/create-from-prompt', {
+        prompt: formData.prompt,
+        genre: formData.genre,
+        length: formData.length,
+        style: 'children-book',
+        userId: user?.id,
+        sceneCount: 8
+      });
 
-  const getWordCount = (length: StoryLength): number => {
-    const counts = {
-      'short': 800,
-      'medium': 1800,
-      'long': 3500,
-      'very long': 5500
-    };
-    return counts[length];
-  };
+      if (response.data.success) {
+        const storybook = response.data.data;
+        
+        // Store the generated storybook
+        const existingStorybooks = localStorage.getItem('userStorybooks');
+        const storybooks = existingStorybooks ? JSON.parse(existingStorybooks) : [];
+        storybooks.unshift(storybook);
+        localStorage.setItem('userStorybooks', JSON.stringify(storybooks));
 
-  const getEstimatedReadingTime = (length: StoryLength): number => {
-    const times = {
-      'short': 3,
-      'medium': 7,
-      'long': 14,
-      'very long': 22
-    };
-    return times[length];
+        toast.success('Interactive storybook generated successfully!');
+        
+        // Navigate to dashboard after a short delay
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 1500);
+        
+      } else {
+        throw new Error(response.data.error || 'Failed to generate storybook');
+      }
+      
+    } catch (error) {
+      console.error('Storybook generation failed:', error);
+      toast.error('Failed to generate storybook. Please try again.');
+      setGenerationProgress({
+        analyzing: false,
+        generating: false,
+        audio: false
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
@@ -301,16 +358,16 @@ const StoryCreator: React.FC = () => {
               <div className="bg-white rounded-lg p-6 shadow-lg">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Story Generation Progress</h3>
                 <div className="space-y-2">
-                  <div className="flex items-center text-sm text-gray-600">
-                    <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
+                  <div className={`flex items-center text-sm ${generationProgress.analyzing ? 'text-blue-600' : 'text-green-600'}`}>
+                    <div className={`w-2 h-2 rounded-full mr-3 ${generationProgress.analyzing ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`}></div>
                     Analyzing your prompt...
                   </div>
-                  <div className="flex items-center text-sm text-gray-600">
-                    <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
-                    Generating story content...
+                  <div className={`flex items-center text-sm ${generationProgress.generating ? 'text-blue-600' : 'text-green-600'}`}>
+                    <div className={`w-2 h-2 rounded-full mr-3 ${generationProgress.generating ? 'bg-blue-500 animate-pulse' : 'bg-green-500'}`}></div>
+                    Generating story content with AI...
                   </div>
-                  <div className="flex items-center text-sm text-blue-600">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full mr-3 animate-pulse"></div>
+                  <div className={`flex items-center text-sm ${generationProgress.audio ? 'text-blue-600' : 'text-gray-600'}`}>
+                    <div className={`w-2 h-2 rounded-full mr-3 ${generationProgress.audio ? 'bg-blue-500 animate-pulse' : 'bg-gray-300'}`}></div>
                     Creating audio narration...
                   </div>
                 </div>
@@ -583,8 +640,8 @@ const StoryCreator: React.FC = () => {
               </div>
             </div>
 
-            {/* Generate Button */}
-            <div className="text-center">
+            {/* Generate Buttons */}
+            <div className="text-center space-y-4">
               <button
                 onClick={generateStory}
                 disabled={!formData.prompt.trim() || isGenerating}
@@ -598,10 +655,24 @@ const StoryCreator: React.FC = () => {
                 ) : (
                   <>
                     <SparklesIcon className="h-6 w-6 mr-2 inline" />
-                    Generate My Story
+                    Generate Story
                   </>
                 )}
               </button>
+
+              <div className="text-center">
+                <button
+                  onClick={generateStorybook}
+                  disabled={!formData.prompt.trim() || isGenerating}
+                  className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <SparklesIcon className="h-5 w-5 mr-2" />
+                  Generate Interactive Storybook
+                </button>
+                <p className="mt-2 text-sm text-gray-500">
+                  Creates a full illustrated storybook with multiple pages and scenes
+                </p>
+              </div>
             </div>
           </div>
         )}

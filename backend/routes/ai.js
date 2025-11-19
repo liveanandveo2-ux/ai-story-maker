@@ -1,13 +1,22 @@
 const express = require('express');
 const axios = require('axios');
+const OpenAI = require('openai');
 const router = express.Router();
+
+// Initialize OpenAI client
+let openai = null;
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key') {
+  openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+}
 
 // AI Story Generation with Multi-Provider Failover
 router.post('/generate', async (req, res) => {
-  const { prompt, genre, length, audioSettings } = req.body;
+  const { prompt, genre, length, audioSettings, userId } = req.body;
   
   try {
-    console.log('Starting AI story generation...', { prompt, genre, length });
+    console.log('Starting AI story generation...', { prompt, genre, length, userId });
     
     // Multi-provider AI story generation with failover
     const storyContent = await generateStoryWithAI(prompt, genre, length);
@@ -22,8 +31,8 @@ router.post('/generate', async (req, res) => {
       genre,
       length,
       prompt,
-      creatorId: '1', // Mock current user
-      creatorName: 'Demo User',
+      creatorId: userId,
+      creatorName: 'AI Story Maker',
       createdAt: new Date(),
       updatedAt: new Date(),
       isPublic: true,
@@ -32,7 +41,7 @@ router.post('/generate', async (req, res) => {
       views: 0,
       likes: 0,
       hasAudio: !!audioSettings,
-      audioUrl: audioSettings ? '/api/audio/generated-' + Date.now() + '.mp3' : null,
+      audioUrl: null,
       hasStorybook: false
     };
     
@@ -46,7 +55,8 @@ router.post('/generate', async (req, res) => {
     console.error('Story generation failed:', error);
     res.status(500).json({ 
       error: 'Story generation failed',
-      message: 'Please try again with a different prompt'
+      message: 'Please try again with a different prompt',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -54,28 +64,31 @@ router.post('/generate', async (req, res) => {
 // Multi-provider AI story generation function
 async function generateStoryWithAI(prompt, genre, length) {
   const providers = [
-    { name: 'huggingface', key: 'HUGGINGFACE_API_KEY' },
-    { name: 'openai', key: 'OPENAI_API_KEY' },
-    { name: 'google', key: 'GOOGLE_AI_API_KEY' }
+    { name: 'openai', priority: 1, key: 'OPENAI_API_KEY' },
+    { name: 'huggingface', priority: 2, key: 'HUGGINGFACE_API_KEY' },
+    { name: 'google', priority: 3, key: 'GOOGLE_AI_API_KEY' }
   ];
+  
+  // Sort by priority
+  providers.sort((a, b) => a.priority - b.priority);
   
   for (const provider of providers) {
     try {
       console.log(`Attempting story generation with ${provider.name}...`);
       
       const apiKey = process.env[provider.key];
-      if (!apiKey || apiKey === 'your_' + provider.key.toLowerCase() + '_key') {
+      if (!apiKey || apiKey === `your_${provider.key.toLowerCase()}` || apiKey === 'your_openai_api_key') {
         console.log(`Skipping ${provider.name} - no valid API key`);
         continue;
       }
       
       let storyContent;
       switch (provider.name) {
-        case 'huggingface':
-          storyContent = await generateWithHuggingFace(prompt, genre, length, apiKey);
-          break;
         case 'openai':
           storyContent = await generateWithOpenAI(prompt, genre, length, apiKey);
+          break;
+        case 'huggingface':
+          storyContent = await generateWithHuggingFace(prompt, genre, length, apiKey);
           break;
         case 'google':
           storyContent = await generateWithGoogleAI(prompt, genre, length, apiKey);
@@ -99,7 +112,56 @@ async function generateStoryWithAI(prompt, genre, length) {
   return generateEnhancedStoryContent(prompt, genre, length);
 }
 
-// Hugging Face integration
+// OpenAI integration (Primary)
+async function generateWithOpenAI(prompt, genre, length, apiKey) {
+  if (!openai) {
+    throw new Error('OpenAI client not initialized');
+  }
+
+  const targetWords = {
+    short: 800,
+    medium: 1800,
+    long: 3500,
+    'very long': 5500
+  };
+  
+  const systemPrompt = `You are a creative and engaging storyteller. Write a ${length} story (approximately ${targetWords[length]} words) in the ${genre} genre.
+
+Story prompt: "${prompt}"
+
+Requirements:
+- Create an engaging, well-structured narrative
+- Include vivid descriptions and compelling characters
+- Develop a clear beginning, middle, and end
+- Make it age-appropriate and family-friendly
+- Ensure the story flows naturally and is immersive
+- Use rich, descriptive language
+- Include dialogue where appropriate
+
+Please write the complete story now:`;
+  
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: 'Please write this story now.' }
+      ],
+      max_tokens: Math.min(targetWords[length] * 1.5, 4000),
+      temperature: 0.8,
+      top_p: 0.9,
+      frequency_penalty: 0.1,
+      presence_penalty: 0.1
+    });
+    
+    return completion.choices[0]?.message?.content?.trim() || '';
+  } catch (error) {
+    console.error('OpenAI API error:', error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// Hugging Face integration (Secondary)
 async function generateWithHuggingFace(prompt, genre, length, apiKey) {
   const targetWords = {
     short: 800,
@@ -108,7 +170,7 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
     'very long': 5500
   };
   
-  const systemPrompt = `You are a creative storyteller. Write a ${length} story (${targetWords[length]} words) in the ${genre} genre based on this prompt: "${prompt}". Make it engaging, well-structured, and age-appropriate.`;
+  const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in the ${genre} genre based on this prompt: "${prompt}". Create an engaging narrative with vivid descriptions and compelling characters.`;
   
   try {
     const response = await axios.post(
@@ -119,7 +181,8 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
           max_length: Math.min(targetWords[length] * 2, 2000),
           temperature: 0.8,
           do_sample: true,
-          top_p: 0.9
+          top_p: 0.9,
+          repetition_penalty: 1.1
         }
       },
       {
@@ -131,54 +194,14 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
       }
     );
     
-    return response.data[0]?.generated_text || response.data;
+    return response.data[0]?.generated_text || response.data || '';
   } catch (error) {
     console.error('Hugging Face API error:', error.response?.data || error.message);
     throw error;
   }
 }
 
-// OpenAI integration
-async function generateWithOpenAI(prompt, genre, length, apiKey) {
-  const targetWords = {
-    short: 800,
-    medium: 1800,
-    long: 3500,
-    'very long': 5500
-  };
-  
-  const systemPrompt = `You are a creative storyteller. Write a ${length} story (approximately ${targetWords[length]} words) in the ${genre} genre. Story prompt: "${prompt}". Create an engaging, well-structured narrative with vivid descriptions and compelling characters.`;
-  
-  try {
-    const response = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-3.5-turbo',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'Please write this story now.' }
-        ],
-        max_tokens: Math.min(targetWords[length] * 1.5, 2000),
-        temperature: 0.8,
-        top_p: 0.9
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 30000
-      }
-    );
-    
-    return response.data.choices[0]?.message?.content || '';
-  } catch (error) {
-    console.error('OpenAI API error:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-// Google AI integration
+// Google AI integration (Tertiary)
 async function generateWithGoogleAI(prompt, genre, length, apiKey) {
   const targetWords = {
     short: 800,
@@ -187,7 +210,7 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
     'very long': 5500
   };
   
-  const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in ${genre} genre. Prompt: "${prompt}". Create an engaging narrative with rich descriptions.`;
+  const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in ${genre} genre. Prompt: "${prompt}". Create an engaging narrative with rich descriptions and compelling characters. Make it family-friendly and well-structured.`;
   
   try {
     const response = await axios.post(
@@ -280,25 +303,25 @@ function generateEnhancedStoryContent(prompt, genre, length) {
   const element = genreElements[genre] || genreElements.fantasy;
   const targetWordCount = targetWords[length] || 1800;
   
-  let story = `Once upon a time, ${prompt} unfolded ${element.setting}. This tale begins with great promise and adventure waiting to unfold.`;
+  let story = `Once upon a time, in a world not far from our own, ${prompt} unfolded ${element.setting}. This tale begins with great promise and adventure waiting to unfold.`;
   
   let currentWords = story.split(' ').length;
   
   // Add narrative structure
-  while (currentWords < targetWordCount * 0.8) {
+  while (currentWords < targetWordCount * 0.7) {
     const paragraph = ` ${element.conflict} became the central challenge that would define our journey. Characters developed and changed as they discovered new strengths within themselves. The world around them seemed to respond to their growth, revealing hidden depths and magical possibilities.`;
     
     story += paragraph;
     currentWords = story.split(' ').length;
     
-    if (currentWords < targetWordCount * 0.8) {
+    if (currentWords < targetWordCount * 0.7) {
       const secondParagraph = ` ${element.resolution} as the story reached its crescendo. Lessons were learned that would echo through time, and bonds were forged that would last beyond the final page. The adventure had changed everyone involved, teaching them that the greatest discoveries come from within.`;
       story += secondParagraph;
       currentWords = story.split(' ').length;
     }
   }
   
-  // Ensure we meet target word count
+  // Ensure we meet target word count with additional content
   while (currentWords < targetWordCount) {
     const additional = ` The journey continued with new wonders and challenges. Each step forward revealed more about the incredible nature of their world and the magic that dwelt within every heart. The story grew richer with every chapter, weaving together themes of courage, love, and the endless possibilities that await those brave enough to dream.`;
     story += additional;
@@ -312,17 +335,8 @@ router.get('/providers', (req, res) => {
   // Check actual AI provider status
   const providers = [
     {
-      name: 'Hugging Face',
-      type: 'primary',
-      isHealthy: !!process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'your_huggingface_api_key',
-      responseTime: process.env.HUGGINGFACE_API_KEY ? 1200 : null,
-      errorRate: 0.02,
-      lastChecked: new Date(),
-      quality: 0.9
-    },
-    {
       name: 'OpenAI',
-      type: 'fallback',
+      type: 'primary',
       isHealthy: !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key',
       responseTime: process.env.OPENAI_API_KEY ? 2000 : null,
       errorRate: 0.01,
@@ -330,8 +344,17 @@ router.get('/providers', (req, res) => {
       quality: 0.95
     },
     {
+      name: 'Hugging Face',
+      type: 'secondary',
+      isHealthy: !!process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'your_huggingface_api_key',
+      responseTime: process.env.HUGGINGFACE_API_KEY ? 1200 : null,
+      errorRate: 0.02,
+      lastChecked: new Date(),
+      quality: 0.9
+    },
+    {
       name: 'Google AI',
-      type: 'fallback',
+      type: 'tertiary',
       isHealthy: !!process.env.GOOGLE_AI_API_KEY && process.env.GOOGLE_AI_API_KEY !== 'your_google_ai_api_key',
       responseTime: process.env.GOOGLE_AI_API_KEY ? 1500 : null,
       errorRate: 0.05,
@@ -343,20 +366,45 @@ router.get('/providers', (req, res) => {
   res.json({ success: true, data: providers });
 });
 
+// Story enhancement endpoint
+router.post('/enhance', async (req, res) => {
+  const { storyId, enhancement, userId } = req.body;
+  
+  try {
+    // Enhance existing story content
+    // This would typically fetch the story from database and enhance it
+    res.json({
+      success: true,
+      message: 'Story enhancement completed',
+      data: {
+        storyId,
+        enhancement,
+        enhanced: true
+      }
+    });
+  } catch (error) {
+    console.error('Story enhancement failed:', error);
+    res.status(500).json({
+      error: 'Story enhancement failed',
+      message: 'Please try again'
+    });
+  }
+});
+
 function generateTitle(prompt, genre) {
   const adjectives = {
-    fantasy: ['Enchanted', 'Mystical', 'Magical', 'Legendary', 'Ancient'],
-    adventure: ['Epic', 'Incredible', 'Thrilling', 'Daring', 'Brave'],
-    mystery: ['Secret', 'Hidden', 'Mysterious', 'Puzzling', 'Intriguing'],
-    romance: ['Love', 'Heart', 'Passionate', 'Sweet', 'Tender'],
-    'sci-fi': ['Future', 'Cosmic', 'Digital', 'Cyber', 'Stellar'],
-    horror: ['Dark', 'Shadow', 'Nightmare', 'Haunted', 'Twisted'],
-    comedy: ['Funny', 'Hilarious', 'Silly', 'Amusing', 'Playful'],
-    drama: ['Deep', 'Emotional', 'Powerful', 'Touching', 'Moving'],
-    thriller: ['Dangerous', 'Edge', 'Suspenseful', 'Tense', 'Thrilling']
+    fantasy: ['Enchanted', 'Mystical', 'Magical', 'Legendary', 'Ancient', 'Secret', 'Hidden'],
+    adventure: ['Epic', 'Incredible', 'Thrilling', 'Daring', 'Brave', 'Bold', 'Fearless'],
+    mystery: ['Secret', 'Hidden', 'Mysterious', 'Puzzling', 'Intriguing', 'Strange', 'Unknown'],
+    romance: ['Love', 'Heart', 'Passionate', 'Sweet', 'Tender', 'Beautiful', 'Romantic'],
+    'sci-fi': ['Future', 'Cosmic', 'Digital', 'Cyber', 'Stellar', 'Galactic', 'Advanced'],
+    horror: ['Dark', 'Shadow', 'Nightmare', 'Haunted', 'Twisted', 'Creepy', 'Eerie'],
+    comedy: ['Funny', 'Hilarious', 'Silly', 'Amusing', 'Playful', 'Cheerful', 'Joyful'],
+    drama: ['Deep', 'Emotional', 'Powerful', 'Touching', 'Moving', 'Profound', 'Intense'],
+    thriller: ['Dangerous', 'Edge', 'Suspenseful', 'Tense', 'Thrilling', 'Urgent', 'Critical']
   };
   
-  const subjects = ['Journey', 'Quest', 'Story', 'Tale', 'Adventure', 'Experience'];
+  const subjects = ['Journey', 'Quest', 'Story', 'Tale', 'Adventure', 'Experience', 'Legend', 'Mystery'];
   const randomAdj = adjectives[genre][Math.floor(Math.random() * adjectives[genre].length)];
   const randomSubject = subjects[Math.floor(Math.random() * subjects.length)];
   

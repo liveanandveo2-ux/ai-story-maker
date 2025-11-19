@@ -1,15 +1,14 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-require('dotenv').config();
+const mongoose = require('mongoose');
 
-// Database connection
-const { connectDB } = require('./config/database');
-
+// Import routes
 const authRoutes = require('./routes/auth');
 const storyRoutes = require('./routes/stories');
-const storybookRoutes = require('./routes/storybooks');
 const audioRoutes = require('./routes/audio');
 const imageRoutes = require('./routes/images');
 const aiRoutes = require('./routes/ai');
@@ -18,45 +17,61 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Connect to MongoDB
+const connectDB = async () => {
+  try {
+    if (process.env.MONGODB_URI) {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log('🚀 MongoDB connected successfully');
+    } else {
+      console.log('⚠️ MongoDB not configured, using mock data mode');
+    }
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error);
+  }
+};
+
+// Call connectDB
 connectDB();
 
 // Security middleware
 app.use(helmet());
 
-// Rate limiting - separate for auth and general API
+// Rate limiting
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.'
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // limit each IP to 20 auth requests per windowMs for development
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   message: 'Too many authentication requests, please try again later.'
 });
 
-// Apply general rate limiting to all API routes
+// Apply rate limiting
 app.use('/api/', generalLimiter);
-// Apply stricter rate limiting specifically to auth routes
 app.use('/api/auth', authLimiter);
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: [
+    'http://localhost:5173',
+    'https://chipper-churros-5a6202.netlify.app',
+    process.env.FRONTEND_URL
+  ].filter(Boolean),
   credentials: true
 }));
 
 // Body parsing middleware
-app.use('/api/images', imageRoutes);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/stories', storyRoutes);
-app.use('/api/storybooks', storybookRoutes);
 app.use('/api/audio', audioRoutes);
+app.use('/api/images', imageRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Health check endpoint
@@ -65,22 +80,28 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     timestamp: new Date().toISOString(),
     service: 'AI Story Maker Backend',
-    database: 'Ready (MongoDB or Mock Mode)'
-  });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Mock Mode',
+    ai_services: {
+      openai: !!process.env.OPENAI_API_KEY,
+      elevenlabs: !!process.env.ELEVENLABS_API_KEY,
+      stability: !!process.env.STABILITY_API_KEY
+    }
   });
 });
 
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Route not found' });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    success: false,
+    error: 'Something went wrong!',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+  });
 });
 
 app.listen(PORT, () => {
