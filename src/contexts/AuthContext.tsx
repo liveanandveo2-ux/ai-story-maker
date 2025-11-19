@@ -3,7 +3,7 @@ import { User } from '../types';
 import axios from 'axios';
 
 // API base URL
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL;
+const API_BASE_URL = import.meta.env.VITE_BACKEND_ENDPOINT || import.meta.env.VITE_BACKEND_HOST;
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000

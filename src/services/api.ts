@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // API base URL - fallback to deployed backend
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL;
+const API_BASE_URL = import.meta.env.VITE_BACKEND_ENDPOINT || import.meta.env.VITE_BACKEND_HOST;
 
 // Create axios instance with base configuration
 const apiInstance = axios.create({

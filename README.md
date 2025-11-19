@@ -174,7 +174,8 @@ cd backend && npm start
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `VITE_API_URL` | Backend API URL | ✅ |
+| `VITE_BACKEND_HOST` | Backend host/API endpoint | ✅ |
+| `VITE_BACKEND_ENDPOINT` | Backend base URL | ✅ |
 | `MONGODB_URI` | MongoDB connection string | ✅ |
 | `JWT_SECRET` | JWT signing secret | ✅ |
 | `VITE_GOOGLE_CLIENT_ID` | Google OAuth client ID | ❌ |

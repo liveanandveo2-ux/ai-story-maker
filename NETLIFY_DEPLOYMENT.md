@@ -21,8 +21,8 @@ This guide covers how to properly configure environment variables for Netlify de
 Add these environment variables in the Netlify dashboard:
 
 ```
-VITE_BACKEND_URL=https://your-backend-url.onrender.com
-VITE_API_URL=https://your-backend-url.onrender.com/api
+VITE_BACKEND_ENDPOINT=https://your-backend-url.onrender.com
+VITE_BACKEND_HOST=https://your-backend-url.onrender.com/api
 VITE_GOOGLE_CLIENT_ID=your_google_client_id_here
 ```
 
@@ -99,14 +99,14 @@ netlify deploy --prod --dir=dist
 
 ### 3. Configure Custom Domain (Optional)
 - In Netlify: Site settings → Domain management
-- Update `VITE_BACKEND_URL` to use your custom domain
+- Update `VITE_BACKEND_ENDPOINT` to use your custom domain
 
 ## Environment Variable Reference
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `VITE_BACKEND_URL` | Frontend to backend communication | `https://your-backend.onrender.com` |
-| `VITE_API_URL` | API endpoint for frontend | `https://your-backend.onrender.com/api` |
+| `VITE_BACKEND_ENDPOINT` | Frontend to backend communication | `https://your-backend.onrender.com` |
+| `VITE_BACKEND_HOST` | API endpoint for frontend | `https://your-backend.onrender.com/api` |
 | `VITE_GOOGLE_CLIENT_ID` | Google OAuth client ID | `123456789-abcdefg.apps.googleusercontent.com` |
 | `MONGODB_URI` | Database connection | `mongodb+srv://user:pass@cluster.mongodb.net/db` |
 | `JWT_SECRET` | JWT token signing secret | `your-32-character-random-secret` |
@@ -119,7 +119,7 @@ netlify deploy --prod --dir=dist
 
 1. **CORS Errors**
    - Ensure your backend CORS settings allow your Netlify domain
-   - Check that `VITE_BACKEND_URL` is correctly configured
+   - Check that `VITE_BACKEND_ENDPOINT` is correctly configured
 
 2. **Build Failures**
    - Verify all required environment variables are set
@@ -138,8 +138,8 @@ Add this to your code to validate required environment variables:
 ```javascript
 // In your main application file
 const requiredEnvVars = [
-  'VITE_BACKEND_URL',
-  'VITE_API_URL',
+  'VITE_BACKEND_ENDPOINT',
+  'VITE_BACKEND_HOST',
   'VITE_GOOGLE_CLIENT_ID'
 ];
 
