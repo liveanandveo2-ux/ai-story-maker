@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // API base URL - fallback to deployed backend
-const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL || 'https://ai-story-maker-backend.onrender.com/api';
+const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_URL;
 
 // Create axios instance with base configuration
 const apiInstance = axios.create({

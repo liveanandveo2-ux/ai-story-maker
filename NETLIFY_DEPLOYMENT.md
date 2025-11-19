@@ -2,6 +2,12 @@
 
 This guide covers how to properly configure environment variables for Netlify deployment of the AI Story Maker application.
 
+## ⚠️ Important Security Note
+
+**Recent Fix**: Hardcoded backend URLs have been removed from the source code to prevent secrets from being exposed in the JavaScript bundle. The application now **requires** the following environment variables to be set, or the frontend will fail to connect to the backend.
+
+**❌ Without these environment variables set, the build will succeed but the frontend will not work!**
+
 ## Environment Variables Setup
 
 ### For Frontend (Netlify Site Settings)
