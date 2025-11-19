@@ -18,19 +18,29 @@ const API_KEY_PATTERNS = {
  * @param {string} provider - The provider name (openai, huggingface, google, etc.)
  * @returns {Object} - Validation result with isValid boolean and error message
  */
+// Clean and normalize API key - remove trailing whitespace and line breaks
+function cleanApiKey(apiKey) {
+  return apiKey
+    .replace(/[\r\n\s]+$/g, '')  // Remove carriage return, line feed, and trailing whitespace
+    .trim();
+}
+
 function validateApiKey(apiKey, provider = 'openai') {
   if (!apiKey) {
     return { isValid: false, error: 'API key is required' };
   }
 
-  if (typeof apiKey !== 'string') {
+  // Clean the API key first
+  const cleanKey = cleanApiKey(apiKey);
+  
+  if (typeof cleanKey !== 'string') {
     return { isValid: false, error: 'API key must be a string' };
   }
 
   // Check for common placeholder values
   const placeholderPatterns = [
     'your_openai_api_key',
-    'your_huggingface_api_key', 
+    'your_huggingface_api_key',
     'your_google_ai_api_key',
     'your_google_api_key',
     'your_elevenlabs_api_key',
@@ -44,19 +54,19 @@ function validateApiKey(apiKey, provider = 'openai') {
     'demo'
   ];
 
-  const lowerKey = apiKey.toLowerCase();
+  const lowerKey = cleanKey.toLowerCase();
   if (placeholderPatterns.some(pattern => lowerKey.includes(pattern.toLowerCase()))) {
     return { isValid: false, error: 'API key appears to be a placeholder value' };
   }
 
   // Check minimum length
-  if (apiKey.length < 10) {
+  if (cleanKey.length < 10) {
     return { isValid: false, error: 'API key is too short to be valid' };
   }
 
   // Check format pattern if available
   const pattern = API_KEY_PATTERNS[provider.toLowerCase()];
-  if (pattern && !pattern.test(apiKey)) {
+  if (pattern && !pattern.test(cleanKey)) {
     return { isValid: false, error: `API key format doesn't match expected pattern for ${provider}` };
   }
 
@@ -128,7 +138,13 @@ function isServiceConfigured(provider) {
     return { configured: false, reason: `${envVar} environment variable not set` };
   }
 
-  const validation = validateApiKey(apiKey, provider);
+  // Clean the API key before validation
+  const cleanKey = cleanApiKey(apiKey);
+  if (!cleanKey) {
+    return { configured: false, reason: `${envVar} is empty after cleaning` };
+  }
+
+  const validation = validateApiKey(cleanKey, provider);
   if (!validation.isValid) {
     return { configured: false, reason: validation.error };
   }
@@ -177,5 +193,6 @@ module.exports = {
   isServiceConfigured,
   getServicesStatus,
   maskApiKey,
+  cleanApiKey,
   API_KEY_PATTERNS
 };

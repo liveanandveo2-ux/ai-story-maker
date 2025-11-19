@@ -233,6 +233,15 @@ async function generateWithElevenLabs(text, voice) {
     throw new Error('ElevenLabs API key not configured');
   }
 
+  // Clean the API key - remove any whitespace, \r\n, or extra characters
+  const cleanApiKey = process.env.ELEVENLABS_API_KEY
+    .replace(/[\r\n\s]+$/g, '')  // Remove carriage return, line feed, and trailing whitespace
+    .trim();
+
+  if (!cleanApiKey) {
+    throw new Error('ElevenLabs API key is empty after cleaning');
+  }
+
   const voiceMap = {
     'male': '21m00Tcm4TlvDq8ikWAM',    // Rachel (female as fallback)
     'female': '21m00Tcm4TlvDq8ikWAM',  // Rachel
@@ -261,7 +270,7 @@ async function generateWithElevenLabs(text, voice) {
         headers: {
           'Accept': 'audio/mpeg',
           'Content-Type': 'application/json',
-          'xi-api-key': process.env.ELEVENLABS_API_KEY
+          'xi-api-key': cleanApiKey
         },
         responseType: 'arraybuffer',
         timeout: 30000
