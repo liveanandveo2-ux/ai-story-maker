@@ -8,6 +8,7 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.24.1",
     "ai-story-maker": "file:..",
     "axios": "^1.6.2",
     "bcryptjs": "^2.4.3",
