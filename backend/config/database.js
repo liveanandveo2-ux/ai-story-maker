@@ -2,12 +2,18 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    // Check if MongoDB URI is set and not using local default
+    // Check if MongoDB URI is set
     const mongoUri = process.env.MONGODB_URI;
     
-    if (!mongoUri || mongoUri.includes('localhost:27017') || mongoUri.includes('127.0.0.1:27017')) {
+    if (!mongoUri) {
       console.log('⚠️  MongoDB not configured, using mock data mode');
       console.log('💡 To enable real database: Set MONGODB_URI environment variable to MongoDB Atlas or local MongoDB');
+      return;
+    }
+    
+    // Only skip localhost in development mode
+    if ((mongoUri.includes('localhost:27017') || mongoUri.includes('127.0.0.1:27017')) && process.env.NODE_ENV !== 'development') {
+      console.log('⚠️  Local MongoDB not supported in production, using mock data mode');
       return;
     }
 

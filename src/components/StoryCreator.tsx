@@ -140,6 +140,25 @@ const StoryCreator: React.FC = () => {
     }
   };
 
+  // Template-based enhancement fallback
+  const enhancePromptWithTemplate = (prompt: string, genre: StoryGenre): string => {
+    const genreEnhancements: Record<StoryGenre, string> = {
+      fantasy: "Set in a magical world where ancient magic meets modern wonder, featuring mystical creatures, enchanted locations, and a young hero discovering their magical heritage while facing an epic quest to save both the magical and mundane realms.",
+      adventure: "An epic journey through uncharted territories where courage, friendship, and determination are tested. The protagonist faces physical and emotional challenges while discovering hidden strengths and forming unbreakable bonds with companions on a quest that will change their world forever.",
+      mystery: "A puzzling tale where every clue leads to deeper secrets. The investigator must use wit, observation, and intuition to unravel a complex mystery that challenges their assumptions and reveals unexpected truths about both the case and themselves.",
+      romance: "A heartwarming love story where two souls find each other despite seemingly impossible circumstances. Their journey involves overcoming misunderstandings, personal growth, and learning that true love means accepting each other's flaws and supporting each other's dreams.",
+      "sci-fi": "Set in a future where advanced technology and human nature collide. The story explores themes of artificial intelligence, space exploration, genetic engineering, or time travel while questioning what it means to be human in an increasingly digital world.",
+      horror: "A spine-chilling tale that builds tension through atmosphere and psychological elements. The protagonist faces their deepest fears while uncovering ancient secrets that threaten not just their sanity, but the very fabric of reality itself.",
+      comedy: "A light-hearted adventure filled with humorous situations, misunderstandings, and comedic mishaps. The story finds humor in everyday life while celebrating the joy of friendship, the importance of staying positive, and the laughter that comes from life's unexpected moments.",
+      drama: "An emotionally powerful story that explores deep themes of family, friendship, loss, and personal growth. Characters face real challenges that test their values and relationships while discovering the strength that comes from vulnerability and human connection.",
+      thriller: "A pulse-pounding adventure where every second counts and danger lurks around every corner. The protagonist must use quick thinking and resourcefulness to stay ahead of threats while uncovering a conspiracy that threatens everything they hold dear."
+    };
+
+    const enhancement = genreEnhancements[genre] || genreEnhancements.fantasy;
+    
+    return `${prompt}\n\nEnhanced narrative direction: ${enhancement}\n\nAdditional story elements: Include rich character development with dialogue that reveals personality, vivid environmental descriptions that set the mood, unexpected plot twists that keep readers engaged, meaningful themes that resonate across age groups, and a satisfying resolution that ties together all story threads while leaving readers feeling inspired.`;
+  };
+
   const enhancePrompt = async () => {
     if (!formData.prompt.trim()) {
       toast.error('Please enter a prompt first to enhance');
@@ -148,15 +167,32 @@ const StoryCreator: React.FC = () => {
 
     setIsAIGenerating(true);
     try {
-      // Use AI to enhance the prompt
-      const enhancedPrompt = formData.prompt + " This story should have rich character development, vivid descriptions, unexpected plot twists, and meaningful themes that resonate with readers of all ages. Include dialogue that reveals personality and move the story forward dynamically.";
-      
-      handleInputChange('prompt', enhancedPrompt);
-      toast.success('Prompt enhanced!');
+      // Use AI to enhance the prompt with real intelligence
+      const response = await apiInstance.post('/api/ai/enhance-prompt', {
+        originalPrompt: formData.prompt,
+        genre: formData.genre,
+        length: formData.length,
+        userId: user?.id
+      });
+
+      if (response.data.success) {
+        handleInputChange('prompt', response.data.data.enhancedPrompt);
+        
+        if (response.data.data.fallbackUsed) {
+          toast.success('Prompt enhanced with intelligent fallback!');
+        } else {
+          toast.success('Prompt enhanced with AI!');
+        }
+      } else {
+        throw new Error(response.data.error || 'Enhancement failed');
+      }
       
     } catch (error) {
       console.error('Error enhancing prompt:', error);
-      toast.error('Failed to enhance prompt');
+      // Fallback to template-based enhancement
+      const enhancedPrompt = enhancePromptWithTemplate(formData.prompt, formData.genre);
+      handleInputChange('prompt', enhancedPrompt);
+      toast.success('Prompt enhanced (using intelligent fallback)!');
     } finally {
       setIsAIGenerating(false);
     }

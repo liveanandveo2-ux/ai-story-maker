@@ -3,14 +3,19 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const OpenAI = require('openai');
+const { validateOpenAIKey, validateHuggingFaceKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
 // Initialize OpenAI client
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key') {
+const openaiKey = process.env.OPENAI_API_KEY;
+if (openaiKey && validateOpenAIKey(openaiKey)) {
   openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: openaiKey,
   });
+  console.log('✅ OpenAI DALL-E client initialized successfully');
+} else {
+  console.log('⚠️  OpenAI API key invalid or not provided for DALL-E');
 }
 
 // Ensure images directory exists
@@ -106,34 +111,43 @@ router.post('/generate', async (req, res) => {
     // Try OpenAI DALL-E first
     if (openai && (provider === 'openai' || provider === 'auto')) {
       try {
+        console.log('🔄 Attempting DALL-E image generation...');
         imageBuffer = await generateWithDALLE(prompt, style, size);
         usedProvider = 'dalle';
       } catch (err) {
-        console.error('DALL-E generation failed:', err);
+        console.error('❌ DALL-E generation failed:', err.message);
         error = err;
       }
     }
 
     // Try Stability AI if OpenAI failed
-    if (!imageBuffer && process.env.STABILITY_API_KEY) {
+    const stabilityStatus = isServiceConfigured('stability');
+    if (!imageBuffer && stabilityStatus.configured) {
       try {
+        console.log('🔄 Attempting Stability AI image generation...');
         imageBuffer = await generateWithStability(prompt, style);
         usedProvider = 'stability';
       } catch (err) {
-        console.error('Stability AI generation failed:', err);
+        console.error('❌ Stability AI generation failed:', err.message);
         error = err;
       }
+    } else if (!stabilityStatus.configured) {
+      console.log('⏭️  Skipping Stability AI -', stabilityStatus.reason);
     }
 
     // Try Hugging Face if others failed
-    if (!imageBuffer && process.env.HUGGINGFACE_API_KEY) {
+    const huggingfaceStatus = isServiceConfigured('huggingface');
+    if (!imageBuffer && huggingfaceStatus.configured) {
       try {
+        console.log('🔄 Attempting HuggingFace image generation...');
         imageBuffer = await generateWithHuggingFace(prompt, style);
         usedProvider = 'huggingface';
       } catch (err) {
-        console.error('Hugging Face generation failed:', err);
+        console.error('❌ Hugging Face generation failed:', err.message);
         error = err;
       }
+    } else if (!huggingfaceStatus.configured) {
+      console.log('⏭️  Skipping HuggingFace -', huggingfaceStatus.reason);
     }
 
     if (!imageBuffer) {
@@ -239,6 +253,10 @@ async function generateWithStability(prompt, style) {
 
 // Hugging Face integration
 async function generateWithHuggingFace(prompt, style) {
+  if (!validateHuggingFaceKey(process.env.HUGGINGFACE_API_KEY)) {
+    throw new Error('Invalid HuggingFace API key format');
+  }
+
   const stylePrompts = {
     storybook: "children's book illustration, colorful, whimsical",
     watercolor: "watercolor painting, artistic, soft",
@@ -248,25 +266,33 @@ async function generateWithHuggingFace(prompt, style) {
 
   const enhancedPrompt = `${prompt}, ${stylePrompts[style] || stylePrompts.storybook}`;
   
-  const response = await axios.post(
-    "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5",
-    {
-      inputs: enhancedPrompt,
-      parameters: {
-        num_inference_steps: 20,
-        guidance_scale: 7.5
-      }
-    },
-    {
-      headers: {
-        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-        'Content-Type': 'application/json'
+  try {
+    console.log('🔄 Using HuggingFace with model: runwayml/stable-diffusion-v1-5');
+    const response = await axios.post(
+      "https://router.huggingface.co/runwayml/stable-diffusion-v1-5",
+      {
+        inputs: enhancedPrompt,
+        parameters: {
+          num_inference_steps: 20,
+          guidance_scale: 7.5
+        }
       },
-      responseType: 'arraybuffer'
-    }
-  );
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        responseType: 'arraybuffer',
+        timeout: 60000
+      }
+    );
 
-  return Buffer.from(response.data);
+    console.log('✅ HuggingFace image generation successful');
+    return Buffer.from(response.data);
+  } catch (error) {
+    console.error('❌ HuggingFace image generation error:', error.response?.data || error.message);
+    throw new Error(`HuggingFace image generation failed: ${error.response?.status || 'Unknown error'}`);
+  }
 }
 
 // POST /api/images/generate-storybook - Generate multiple images for a storybook

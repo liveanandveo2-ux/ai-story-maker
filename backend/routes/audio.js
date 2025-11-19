@@ -3,14 +3,19 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const OpenAI = require('openai');
+const { validateOpenAIKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
 // Initialize OpenAI client
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key') {
+const openaiKey = process.env.OPENAI_API_KEY;
+if (openaiKey && validateOpenAIKey(openaiKey)) {
   openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: openaiKey,
   });
+  console.log('✅ OpenAI TTS client initialized successfully');
+} else {
+  console.log('⚠️  OpenAI API key invalid or not provided for TTS');
 }
 
 // Ensure audio directory exists
@@ -70,7 +75,7 @@ router.get('/', (req, res) => {
   }
 });
 
-// POST /api/audio/generate - Generate audio from text using TTS
+// POST /api/audio/generate - Generate audio from text using TTS with enhanced error handling
 router.post('/generate', async (req, res) => {
   try {
     const { text, voice = 'alloy', speed = 1.0, provider = 'openai' } = req.body;
@@ -79,84 +84,157 @@ router.post('/generate', async (req, res) => {
       return res.status(400).json({ error: 'Text is required for audio generation' });
     }
 
-    if (!openai) {
+    if (text.length > 4096) {
+      return res.status(400).json({ 
+        error: 'Text too long for audio generation',
+        maxLength: 4096,
+        currentLength: text.length
+      });
+    }
+
+    console.log(`Generating audio for text: "${text.substring(0, 50)}..." (${text.length} chars)`);
+
+    // Multi-provider TTS with robust failover
+    const providers = [
+      { name: 'openai', priority: 1, enabled: !!openai },
+      { name: 'elevenlabs', priority: 2, enabled: !!process.env.ELEVENLABS_API_KEY }
+    ].filter(p => p.enabled);
+
+    if (providers.length === 0) {
       return res.status(503).json({
-        error: 'Text-to-speech service not configured',
-        message: 'OpenAI API key is required for audio generation'
+        error: 'No text-to-speech service configured',
+        message: 'Please configure either OpenAI or ElevenLabs API keys in your environment',
+        providers: {
+          openai: !!openai,
+          elevenlabs: !!process.env.ELEVENLABS_API_KEY
+        },
+        suggestion: 'Set OPENAI_API_KEY or ELEVENLABS_API_KEY in your environment variables'
       });
     }
 
-    console.log(`Generating audio for text: "${text.substring(0, 50)}..."`);
+    let lastError = null;
+    let usedProvider = null;
+    let result = null;
 
-    try {
-      // Generate audio using OpenAI TTS
-      const audioResponse = await openai.audio.speech.create({
-        model: 'tts-1',
-        voice: mapVoiceType(voice),
-        input: text,
-        speed: speed
-      });
-
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-      const audioFilename = `generated-${Date.now()}.mp3`;
-      const audioPath = path.join(audioDir, audioFilename);
-
-      // Save the audio file
-      fs.writeFileSync(audioPath, audioBuffer);
-
-      // Calculate estimated duration (rough estimate: 150 chars per minute)
-      const estimatedDuration = Math.ceil(text.length / 150);
-
-      res.json({
-        success: true,
-        message: 'Audio generated successfully using OpenAI TTS',
-        data: {
-          audioUrl: `/api/audio/${audioFilename}`,
-          filename: audioFilename,
-          provider: 'openai',
-          voice: voice,
-          textLength: text.length,
-          estimatedDuration: estimatedDuration,
-          fileSize: audioBuffer.length
+    for (const provider of providers) {
+      try {
+        console.log(`🔄 Attempting TTS with ${provider.name}...`);
+        
+        switch (provider.name) {
+          case 'openai':
+            result = await generateWithOpenAI(text, voice, speed);
+            break;
+          case 'elevenlabs':
+            result = await generateWithElevenLabs(text, voice);
+            break;
+          default:
+            continue;
         }
-      });
 
-    } catch (ttsError) {
-      console.error('OpenAI TTS error:', ttsError);
-      
-      // Fallback to ElevenLabs if OpenAI fails
-      if (process.env.ELEVENLABS_API_KEY) {
-        try {
-          const elevenlabsResponse = await generateWithElevenLabs(text, voice);
-          
-          if (elevenlabsResponse.success) {
-            return res.json(elevenlabsResponse);
-          }
-        } catch (elevenlabsError) {
-          console.error('ElevenLabs TTS error:', elevenlabsError);
+        if (result && result.success) {
+          usedProvider = provider.name;
+          console.log(`✅ TTS successful with ${provider.name}`);
+          break;
         }
+      } catch (error) {
+        console.error(`❌ ${provider.name} TTS failed:`, error.message);
+        lastError = error;
+        continue;
       }
-
-      throw new Error('All TTS services failed');
     }
+
+    if (result && result.success) {
+      return res.json({
+        success: true,
+        message: `Audio generated successfully using ${usedProvider}`,
+        data: result.data
+      });
+    }
+
+    // All providers failed
+    throw new Error(`All TTS providers failed. Last error: ${lastError?.message || 'Unknown error'}`);
 
   } catch (error) {
     console.error('Error generating audio:', error);
     res.status(500).json({
       error: 'Failed to generate audio',
-      message: error.message || 'Audio generation service unavailable'
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? {
+        error: error.message,
+        stack: error.stack,
+        providers: {
+          openai: !!openai,
+          elevenlabs: !!process.env.ELEVENLABS_API_KEY
+        }
+      } : undefined
     });
   }
 });
 
-// ElevenLabs TTS integration (fallback)
+// OpenAI TTS implementation with enhanced error handling
+async function generateWithOpenAI(text, voice, speed) {
+  if (!openai) {
+    throw new Error('OpenAI client not initialized');
+  }
+
+  try {
+    console.log('Using OpenAI TTS with model: tts-1');
+    
+    const audioResponse = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: mapVoiceType(voice),
+      input: text,
+      speed: Math.max(0.25, Math.min(4.0, speed)) // Clamp speed to valid range
+    });
+
+    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    const audioFilename = `openai-${Date.now()}.mp3`;
+    const audioPath = path.join(audioDir, audioFilename);
+
+    // Save the audio file
+    fs.writeFileSync(audioPath, audioBuffer);
+
+    // Calculate estimated duration (rough estimate: 150 chars per minute)
+    const estimatedDuration = Math.ceil(text.length / 150);
+
+    return {
+      success: true,
+      data: {
+        audioUrl: `/api/audio/${audioFilename}`,
+        filename: audioFilename,
+        provider: 'openai',
+        voice: voice,
+        textLength: text.length,
+        estimatedDuration: estimatedDuration,
+        fileSize: audioBuffer.length,
+        quality: 'standard'
+      }
+    };
+
+  } catch (error) {
+    console.error('OpenAI TTS error:', error);
+    
+    // Provide specific error messages based on error type
+    if (error.response?.status === 429) {
+      throw new Error('OpenAI API rate limit exceeded. Please try again later.');
+    } else if (error.response?.status === 401) {
+      throw new Error('OpenAI API key invalid or expired.');
+    } else if (error.message?.includes('quota')) {
+      throw new Error('OpenAI API quota exceeded.');
+    } else {
+      throw new Error(`OpenAI TTS failed: ${error.message}`);
+    }
+  }
+}
+
+// ElevenLabs TTS implementation with enhanced error handling
 async function generateWithElevenLabs(text, voice) {
   if (!process.env.ELEVENLABS_API_KEY) {
     throw new Error('ElevenLabs API key not configured');
   }
 
   const voiceMap = {
-    'male': '21m00Tcm4TlvDq8ikWAM',    // Rachel (female) as fallback
+    'male': '21m00Tcm4TlvDq8ikWAM',    // Rachel (female as fallback)
     'female': '21m00Tcm4TlvDq8ikWAM',  // Rachel
     'child': 'pNInz6obpgDQGcFmaJgB',   // Adam (male as child alternative)
     'elderly': 'AZnzlk1XvdvUeBnXmlld'  // Domi (elderly voice)
@@ -165,6 +243,8 @@ async function generateWithElevenLabs(text, voice) {
   const voiceId = voiceMap[voice] || voiceMap.female;
 
   try {
+    console.log('Using ElevenLabs TTS');
+    
     const response = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
       {
@@ -172,7 +252,9 @@ async function generateWithElevenLabs(text, voice) {
         model_id: "eleven_monolingual_v1",
         voice_settings: {
           stability: 0.5,
-          similarity_boost: 0.75
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true
         }
       },
       {
@@ -181,9 +263,14 @@ async function generateWithElevenLabs(text, voice) {
           'Content-Type': 'application/json',
           'xi-api-key': process.env.ELEVENLABS_API_KEY
         },
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        timeout: 30000
       }
     );
+
+    if (response.status !== 200) {
+      throw new Error(`ElevenLabs API returned status ${response.status}`);
+    }
 
     const audioBuffer = Buffer.from(response.data);
     const audioFilename = `elevenlabs-${Date.now()}.mp3`;
@@ -201,13 +288,23 @@ async function generateWithElevenLabs(text, voice) {
         voice: voice,
         textLength: text.length,
         estimatedDuration: Math.ceil(text.length / 150),
-        fileSize: audioBuffer.length
+        fileSize: audioBuffer.length,
+        quality: 'premium'
       }
     };
 
   } catch (error) {
-    console.error('ElevenLabs API error:', error.response?.data || error.message);
-    throw error;
+    console.error('ElevenLabs API error:', error);
+    
+    if (error.response?.status === 401) {
+      throw new Error('ElevenLabs API key invalid or expired.');
+    } else if (error.response?.status === 429) {
+      throw new Error('ElevenLabs API rate limit exceeded.');
+    } else if (error.message?.includes('quota')) {
+      throw new Error('ElevenLabs API quota exceeded.');
+    } else {
+      throw new Error(`ElevenLabs TTS failed: ${error.message}`);
+    }
   }
 }
 
@@ -223,7 +320,7 @@ function mapVoiceType(voiceType) {
   return voiceMap[voiceType] || 'alloy';
 }
 
-// POST /api/audio/narrate - Generate narration for a story
+// POST /api/audio/narrate - Generate narration for a story with enhanced error handling
 router.post('/narrate', async (req, res) => {
   try {
     const { storyId, storyText, voice = 'alloy', speed = 1.0 } = req.body;
@@ -232,79 +329,109 @@ router.post('/narrate', async (req, res) => {
       return res.status(400).json({ error: 'Story text is required' });
     }
 
-    if (!openai) {
-      return res.status(503).json({
-        error: 'Text-to-speech service not configured',
-        message: 'OpenAI API key is required for narration'
+    if (storyText.length > 16000) {
+      return res.status(400).json({ 
+        error: 'Story text too long for narration',
+        maxLength: 16000,
+        currentLength: storyText.length,
+        suggestion: 'Consider breaking the story into smaller segments'
       });
     }
 
-    console.log(`Generating narration for story: ${storyId || 'unnamed'}`);
+    console.log(`Generating narration for story: ${storyId || 'unnamed'} (${storyText.length} chars)`);
+
+    // Clean and prepare story text for narration
+    const cleanText = cleanTextForNarration(storyText);
 
     try {
-      // Clean and prepare story text for narration
-      const cleanText = cleanTextForNarration(storyText);
-      
-      // Generate audio using OpenAI TTS
-      const audioResponse = await openai.audio.speech.create({
-        model: 'tts-1-hd', // Use HD model for better quality
-        voice: mapVoiceType(voice),
-        input: cleanText,
-        speed: speed
-      });
+      // Generate audio using OpenAI TTS (preferred for narration)
+      if (openai) {
+        const audioResponse = await openai.audio.speech.create({
+          model: 'tts-1-hd', // Use HD model for better narration quality
+          voice: mapVoiceType(voice),
+          input: cleanText,
+          speed: Math.max(0.25, Math.min(4.0, speed))
+        });
 
-      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-      const audioFilename = `narration-${storyId || Date.now()}.mp3`;
-      const audioPath = path.join(audioDir, audioFilename);
+        const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+        const audioFilename = `narration-${storyId || Date.now()}.mp3`;
+        const audioPath = path.join(audioDir, audioFilename);
 
-      // Save the audio file
-      fs.writeFileSync(audioPath, audioBuffer);
+        // Save the audio file
+        fs.writeFileSync(audioPath, audioBuffer);
 
-      const estimatedDuration = Math.ceil(cleanText.length / 150);
+        const estimatedDuration = Math.ceil(cleanText.length / 150);
 
-      res.json({
-        success: true,
-        message: 'Story narration generated successfully using OpenAI TTS',
-        data: {
-          audioUrl: `/api/audio/${audioFilename}`,
-          filename: audioFilename,
-          storyId: storyId,
-          voice: voice,
-          speed: speed,
-          estimatedDuration: estimatedDuration,
-          fileSize: audioBuffer.length,
-          characterCount: cleanText.length
-        }
-      });
+        return res.json({
+          success: true,
+          message: 'Story narration generated successfully using OpenAI TTS HD',
+          data: {
+            audioUrl: `/api/audio/${audioFilename}`,
+            filename: audioFilename,
+            storyId: storyId,
+            voice: voice,
+            speed: speed,
+            estimatedDuration: estimatedDuration,
+            fileSize: audioBuffer.length,
+            characterCount: cleanText.length,
+            quality: 'hd'
+          }
+        });
+      }
+
+      // Fallback to ElevenLabs if OpenAI not available
+      if (process.env.ELEVENLABS_API_KEY) {
+        const result = await generateWithElevenLabs(cleanText, voice);
+        return res.json({
+          success: true,
+          message: 'Story narration generated successfully using ElevenLabs TTS',
+          data: {
+            ...result.data,
+            storyId: storyId
+          }
+        });
+      }
+
+      throw new Error('No TTS service available for narration');
 
     } catch (ttsError) {
-      console.error('OpenAI TTS narration error:', ttsError);
-      throw new Error('Failed to generate narration');
+      console.error('TTS narration error:', ttsError);
+      throw new Error(`Failed to generate narration: ${ttsError.message}`);
     }
 
   } catch (error) {
     console.error('Error generating narration:', error);
     res.status(500).json({
       error: 'Failed to generate narration',
-      details: error.message
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
 
-// Clean text for better narration
+// Clean text for better narration with enhanced processing
 function cleanTextForNarration(text) {
   return text
     // Remove markdown formatting
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
+    .replace(/`(.*?)`/g, '$1')
     .replace(/#{1,6}\s/g, '')
-    // Remove extra whitespace
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    // Clean up excessive whitespace
     .replace(/\n\s*\n/g, '\n\n')
     .replace(/[ \t]+/g, ' ')
-    // Add pauses for better flow
+    .replace(/\.{3,}/g, '...')
+    // Add natural pauses for better flow
     .replace(/\.\s/g, '. ... ')
     .replace(/!\s/g, '! ... ')
     .replace(/\?\s/g, '? ... ')
+    .replace(/:\s/g, ': ... ')
+    // Fix common narration issues
+    .replace(/\bMr\./g, 'Mister')
+    .replace(/\bMrs\./g, 'Missus')
+    .replace(/\bDr\./g, 'Doctor')
+    .replace(/\bProf\./g, 'Professor')
     .trim();
 }
 

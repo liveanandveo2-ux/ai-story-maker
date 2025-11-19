@@ -1,14 +1,19 @@
 const express = require('express');
 const axios = require('axios');
 const OpenAI = require('openai');
+const { validateOpenAIKey, validateHuggingFaceKey, validateGoogleAIKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
 // Initialize OpenAI client
 let openai = null;
-if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key') {
+const openaiKey = process.env.OPENAI_API_KEY;
+if (openaiKey && validateOpenAIKey(openaiKey)) {
   openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: openaiKey,
   });
+  console.log('✅ OpenAI client initialized successfully');
+} else {
+  console.log('⚠️  OpenAI API key invalid or not provided');
 }
 
 // AI Story Generation with Multi-Provider Failover
@@ -64,9 +69,9 @@ router.post('/generate', async (req, res) => {
 // Multi-provider AI story generation function
 async function generateStoryWithAI(prompt, genre, length) {
   const providers = [
-    { name: 'openai', priority: 1, key: 'OPENAI_API_KEY' },
-    { name: 'huggingface', priority: 2, key: 'HUGGINGFACE_API_KEY' },
-    { name: 'google', priority: 3, key: 'GOOGLE_AI_API_KEY' }
+    { name: 'openai', priority: 1, key: 'OPENAI_API_KEY', validator: validateOpenAIKey },
+    { name: 'huggingface', priority: 2, key: 'HUGGINGFACE_API_KEY', validator: validateHuggingFaceKey },
+    { name: 'google', priority: 3, key: 'GOOGLE_AI_API_KEY', validator: validateGoogleAIKey }
   ];
   
   // Sort by priority
@@ -74,11 +79,17 @@ async function generateStoryWithAI(prompt, genre, length) {
   
   for (const provider of providers) {
     try {
-      console.log(`Attempting story generation with ${provider.name}...`);
+      console.log(`🔄 Attempting story generation with ${provider.name}...`);
       
       const apiKey = process.env[provider.key];
-      if (!apiKey || apiKey === `your_${provider.key.toLowerCase()}` || apiKey === 'your_openai_api_key') {
-        console.log(`Skipping ${provider.name} - no valid API key`);
+      if (!apiKey) {
+        console.log(`⏭️  Skipping ${provider.name} - no API key provided`);
+        continue;
+      }
+      
+      // Validate API key format
+      if (!provider.validator(apiKey)) {
+        console.log(`⚠️  Skipping ${provider.name} - invalid API key format (${maskApiKey(apiKey)})`);
         continue;
       }
       
@@ -98,26 +109,24 @@ async function generateStoryWithAI(prompt, genre, length) {
       }
       
       if (storyContent && storyContent.length > 100) {
-        console.log(`Success with ${provider.name}`);
+        console.log(`✅ Success with ${provider.name}! Generated ${storyContent.length} characters`);
         return storyContent;
+      } else {
+        throw new Error(`Generated content too short (${storyContent?.length || 0} chars)`);
       }
     } catch (error) {
-      console.error(`${provider.name} failed:`, error.message);
+      console.error(`❌ ${provider.name} failed:`, error.message);
       continue;
     }
   }
   
   // If all providers fail, use enhanced template
-  console.log('All AI providers failed, using enhanced template');
+  console.log('⚠️  All AI providers failed, using enhanced template fallback');
   return generateEnhancedStoryContent(prompt, genre, length);
 }
 
 // OpenAI integration (Primary)
 async function generateWithOpenAI(prompt, genre, length, apiKey) {
-  if (!openai) {
-    throw new Error('OpenAI client not initialized');
-  }
-
   const targetWords = {
     short: 800,
     medium: 1800,
@@ -163,6 +172,10 @@ Please write the complete story now:`;
 
 // Hugging Face integration (Secondary)
 async function generateWithHuggingFace(prompt, genre, length, apiKey) {
+  if (!validateHuggingFaceKey(apiKey)) {
+    throw new Error('Invalid HuggingFace API key format');
+  }
+
   const targetWords = {
     short: 800,
     medium: 1800,
@@ -173,8 +186,9 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
   const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in the ${genre} genre based on this prompt: "${prompt}". Create an engaging narrative with vivid descriptions and compelling characters.`;
   
   try {
+    console.log('🔄 Using HuggingFace inference API with model: microsoft/DialoGPT-large');
     const response = await axios.post(
-      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-large',
+      'https://router.huggingface.co/microsoft/DialoGPT-large',
       {
         inputs: systemPrompt,
         parameters: {
@@ -182,7 +196,8 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
           temperature: 0.8,
           do_sample: true,
           top_p: 0.9,
-          repetition_penalty: 1.1
+          repetition_penalty: 1.1,
+          return_full_text: false
         }
       },
       {
@@ -194,15 +209,26 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
       }
     );
     
-    return response.data[0]?.generated_text || response.data || '';
+    // Handle different response formats
+    const result = response.data[0]?.generated_text || response.data?.generated_text || response.data || '';
+    if (!result || result.length < 50) {
+      throw new Error('HuggingFace returned insufficient content');
+    }
+    
+    console.log('✅ HuggingFace generation successful');
+    return result;
   } catch (error) {
-    console.error('Hugging Face API error:', error.response?.data || error.message);
-    throw error;
+    console.error('❌ HuggingFace API error:', error.response?.data || error.message);
+    throw new Error(`HuggingFace API failed: ${error.response?.status || 'Unknown error'}`);
   }
 }
 
 // Google AI integration (Tertiary)
 async function generateWithGoogleAI(prompt, genre, length, apiKey) {
+  if (!validateGoogleAIKey(apiKey)) {
+    throw new Error('Invalid Google AI API key format');
+  }
+
   const targetWords = {
     short: 800,
     medium: 1800,
@@ -213,8 +239,10 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
   const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in ${genre} genre. Prompt: "${prompt}". Create an engaging narrative with rich descriptions and compelling characters. Make it family-friendly and well-structured.`;
   
   try {
+    console.log('🔄 Using Google AI with model: gemini-1.5-flash');
+    // Updated endpoint with current supported model
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         contents: [
           {
@@ -226,7 +254,25 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
           topK: 40,
           topP: 0.95,
           maxOutputTokens: Math.min(targetWords[length] * 1.5, 2000)
-        }
+        },
+        safetySettings: [
+          {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          },
+          {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+          }
+        ]
       },
       {
         headers: {
@@ -236,11 +282,194 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
       }
     );
     
-    return response.data.candidates[0]?.content?.parts[0]?.text || '';
+    // Handle response safely
+    const candidates = response.data?.candidates || [];
+    if (!candidates.length || !candidates[0]?.content?.parts?.length) {
+      throw new Error('Google AI returned empty or malformed response');
+    }
+    
+    const result = candidates[0].content.parts[0].text || '';
+    if (!result || result.length < 50) {
+      throw new Error('Google AI returned insufficient content');
+    }
+    
+    console.log('✅ Google AI generation successful');
+    return result;
   } catch (error) {
-    console.error('Google AI API error:', error.response?.data || error.message);
-    throw error;
+    console.error('❌ Google AI API error:', error.response?.data || error.message);
+    throw new Error(`Google AI API failed: ${error.response?.status || 'Unknown error'}`);
   }
+}
+
+// POST /api/ai/enhance-prompt - Enhance story prompt using AI
+router.post('/enhance-prompt', async (req, res) => {
+  const { originalPrompt, genre, length, userId } = req.body;
+  
+  try {
+    console.log('Enhancing prompt with AI...', { originalPrompt, genre, length });
+    
+    // Use AI to enhance the prompt
+    const enhancedPrompt = await enhancePromptWithAI(originalPrompt, genre, length);
+    
+    res.json({
+      success: true,
+      message: 'Prompt enhanced successfully',
+      data: {
+        enhancedPrompt,
+        originalPrompt,
+        genre,
+        length,
+        enhancements: [
+          'Added narrative structure guidance',
+          'Enhanced character development focus',
+          'Improved story pacing suggestions',
+          'Added dialogue and interaction prompts',
+          'Included atmospheric descriptions',
+          'Integrated thematic elements'
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Prompt enhancement failed:', error);
+    // Provide template-based enhancement as fallback
+    const enhancedPrompt = enhancePromptWithTemplate(originalPrompt, genre);
+    
+    res.json({
+      success: true,
+      message: 'Prompt enhanced with intelligent fallback',
+      data: {
+        enhancedPrompt,
+        originalPrompt,
+        genre,
+        length,
+        fallbackUsed: true,
+        enhancements: ['Template-based narrative guidance applied']
+      }
+    });
+  }
+});
+
+// AI-powered prompt enhancement
+async function enhancePromptWithAI(prompt, genre, length) {
+  const providers = [
+    { name: 'openai', priority: 1, key: 'OPENAI_API_KEY', validator: validateOpenAIKey },
+    { name: 'huggingface', priority: 2, key: 'HUGGINGFACE_API_KEY', validator: validateHuggingFaceKey },
+    { name: 'google', priority: 3, key: 'GOOGLE_AI_API_KEY', validator: validateGoogleAIKey }
+  ];
+  
+  // Sort by priority
+  providers.sort((a, b) => a.priority - b.priority);
+  
+  for (const provider of providers) {
+    try {
+      const apiKey = process.env[provider.key];
+      if (!apiKey || !provider.validator(apiKey)) {
+        continue;
+      }
+      
+      const enhancedPrompt = await enhanceWithProvider(prompt, genre, length, provider.name, apiKey);
+      if (enhancedPrompt && enhancedPrompt.length > prompt.length * 1.5) {
+        console.log(`✅ Prompt enhancement successful with ${provider.name}`);
+        return enhancedPrompt;
+      }
+    } catch (error) {
+      console.error(`❌ ${provider.name} prompt enhancement failed:`, error.message);
+      continue;
+    }
+  }
+  
+  // If all providers fail, use template enhancement
+  return enhancePromptWithTemplate(prompt, genre);
+}
+
+// Enhance prompt with specific provider
+async function enhanceWithProvider(prompt, genre, length, providerName, apiKey) {
+  const targetWords = {
+    short: 800,
+    medium: 1800,
+    long: 3500,
+    'very long': 5500
+  };
+  
+  const enhancementPrompt = `Enhance this ${genre} story prompt for a ${length} story (${targetWords[length]} words):
+
+Original prompt: "${prompt}"
+
+Please enhance it by adding:
+1. Narrative structure guidance (beginning, middle, end)
+2. Character development suggestions
+3. Dialogue and interaction prompts
+4. Atmospheric and environmental descriptions
+5. Plot development elements
+6. Themes and meaningful messages
+7. Age-appropriate content guidelines
+
+Make the enhanced prompt detailed enough to guide the creation of a compelling ${genre} story.`;
+
+  switch (providerName) {
+    case 'openai':
+      if (!openai) throw new Error('OpenAI client not initialized');
+      
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: 'You are an expert story enhancer and writing coach. Enhance story prompts to be more detailed and compelling.' },
+          { role: 'user', content: enhancementPrompt }
+        ],
+        max_tokens: 1000,
+        temperature: 0.7
+      });
+      
+      return completion.choices[0]?.message?.content?.trim() || '';
+      
+    case 'huggingface':
+      const hfResponse = await axios.post(
+        'https://router.huggingface.co/microsoft/DialoGPT-large',
+        { inputs: enhancementPrompt },
+        {
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          timeout: 15000
+        }
+      );
+      
+      const result = hfResponse.data[0]?.generated_text || hfResponse.data?.generated_text || '';
+      return result.replace(/^.*?:/, '').trim() || '';
+      
+    case 'google':
+      const googleResponse = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          contents: [{ parts: [{ text: enhancementPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
+        },
+        { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
+      );
+      
+      const candidates = googleResponse.data?.candidates || [];
+      return candidates[0]?.content?.parts?.[0]?.text || '';
+      
+    default:
+      throw new Error(`Unknown provider: ${providerName}`);
+  }
+}
+
+// Template-based enhancement fallback
+function enhancePromptWithTemplate(prompt, genre) {
+  const genreEnhancements = {
+    fantasy: "Set in a magical world where ancient magic meets modern wonder, featuring mystical creatures, enchanted locations, and a young hero discovering their magical heritage while facing an epic quest to save both the magical and mundane realms.",
+    adventure: "An epic journey through uncharted territories where courage, friendship, and determination are tested. The protagonist faces physical and emotional challenges while discovering hidden strengths and forming unbreakable bonds with companions on a quest that will change their world forever.",
+    mystery: "A puzzling tale where every clue leads to deeper secrets. The investigator must use wit, observation, and intuition to unravel a complex mystery that challenges their assumptions and reveals unexpected truths about both the case and themselves.",
+    romance: "A heartwarming love story where two souls find each other despite seemingly impossible circumstances. Their journey involves overcoming misunderstandings, personal growth, and learning that true love means accepting each other's flaws and supporting each other's dreams.",
+    'sci-fi': "Set in a future where advanced technology and human nature collide. The story explores themes of artificial intelligence, space exploration, genetic engineering, or time travel while questioning what it means to be human in an increasingly digital world.",
+    horror: "A spine-chilling tale that builds tension through atmosphere and psychological elements. The protagonist faces their deepest fears while uncovering ancient secrets that threaten not just their sanity, but the very fabric of reality itself.",
+    comedy: "A light-hearted adventure filled with humorous situations, misunderstandings, and comedic mishaps. The story finds humor in everyday life while celebrating the joy of friendship, the importance of staying positive, and the laughter that comes from life's unexpected moments.",
+    drama: "An emotionally powerful story that explores deep themes of family, friendship, loss, and personal growth. Characters face real challenges that test their values and relationships while discovering the strength that comes from vulnerability and human connection.",
+    thriller: "A pulse-pounding adventure where every second counts and danger lurks around every corner. The protagonist must use quick thinking and resourcefulness to stay ahead of threats while uncovering a conspiracy that threatens everything they hold dear."
+  };
+  
+  const enhancement = genreEnhancements[genre] || genreEnhancements.fantasy;
+  
+  return `${prompt}\n\nEnhanced narrative direction: ${enhancement}\n\nAdditional story elements: Include rich character development with dialogue that reveals personality, vivid environmental descriptions that set the mood, unexpected plot twists that keep readers engaged, meaningful themes that resonate across age groups, and a satisfying resolution that ties together all story threads while leaving readers feeling inspired.`;
 }
 
 // Enhanced fallback content generator
@@ -332,38 +561,62 @@ function generateEnhancedStoryContent(prompt, genre, length) {
 }
 
 router.get('/providers', (req, res) => {
-  // Check actual AI provider status
+  // Check actual AI provider status using validation
+  const openaiStatus = isServiceConfigured('openai');
+  const huggingfaceStatus = isServiceConfigured('huggingface');
+  const googleStatus = isServiceConfigured('google');
+  
   const providers = [
     {
       name: 'OpenAI',
       type: 'primary',
-      isHealthy: !!process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your_openai_api_key',
-      responseTime: process.env.OPENAI_API_KEY ? 2000 : null,
-      errorRate: 0.01,
+      isHealthy: openaiStatus.configured,
+      isConfigured: openaiStatus.configured,
       lastChecked: new Date(),
-      quality: 0.95
+      quality: 0.95,
+      responseTime: openaiStatus.configured ? 2000 : null,
+      errorRate: 0.01,
+      status: openaiStatus.configured ? 'healthy' : 'unhealthy',
+      message: openaiStatus.configured ? 'Ready' : openaiStatus.reason,
+      maskedKey: openaiStatus.configured ? `sk-****${process.env.OPENAI_API_KEY?.slice(-4)}` : null
     },
     {
       name: 'Hugging Face',
       type: 'secondary',
-      isHealthy: !!process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== 'your_huggingface_api_key',
-      responseTime: process.env.HUGGINGFACE_API_KEY ? 1200 : null,
-      errorRate: 0.02,
+      isHealthy: huggingfaceStatus.configured,
+      isConfigured: huggingfaceStatus.configured,
       lastChecked: new Date(),
-      quality: 0.9
+      quality: 0.9,
+      responseTime: huggingfaceStatus.configured ? 1200 : null,
+      errorRate: 0.02,
+      status: huggingfaceStatus.configured ? 'healthy' : 'unhealthy',
+      message: huggingfaceStatus.configured ? 'Ready' : huggingfaceStatus.reason,
+      maskedKey: huggingfaceStatus.configured ? `hf_****${process.env.HUGGINGFACE_API_KEY?.slice(-4)}` : null
     },
     {
       name: 'Google AI',
       type: 'tertiary',
-      isHealthy: !!process.env.GOOGLE_AI_API_KEY && process.env.GOOGLE_AI_API_KEY !== 'your_google_ai_api_key',
-      responseTime: process.env.GOOGLE_AI_API_KEY ? 1500 : null,
-      errorRate: 0.05,
+      isHealthy: googleStatus.configured,
+      isConfigured: googleStatus.configured,
       lastChecked: new Date(),
-      quality: 0.88
+      quality: 0.88,
+      responseTime: googleStatus.configured ? 1500 : null,
+      errorRate: 0.05,
+      status: googleStatus.configured ? 'healthy' : 'unhealthy',
+      message: googleStatus.configured ? 'Ready (gemini-1.5-flash)' : googleStatus.reason,
+      maskedKey: googleStatus.configured ? `AIza****${process.env.GOOGLE_AI_API_KEY?.slice(-4)}` : null
     }
   ];
   
-  res.json({ success: true, data: providers });
+  res.json({
+    success: true,
+    data: providers,
+    summary: {
+      totalProviders: providers.length,
+      healthyProviders: providers.filter(p => p.isHealthy).length,
+      configuredProviders: providers.filter(p => p.isConfigured).length
+    }
+  });
 });
 
 // Story enhancement endpoint
