@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Story, StoryGenre, StoryLength, AudioSettings } from '../types';
-import axios from 'axios';
+import apiInstance from '../services/api';
 import { 
   ArrowLeftIcon, 
   SparklesIcon, 
@@ -177,7 +177,7 @@ const StoryCreator: React.FC = () => {
     
     try {
       // Call real AI story generation API
-      const response = await axios.post('/api/ai/generate', {
+      const response = await apiInstance.post('/api/ai/generate', {
         prompt: formData.prompt,
         genre: formData.genre,
         length: formData.length,
@@ -203,7 +203,7 @@ const StoryCreator: React.FC = () => {
               audio: true
             });
 
-            const audioResponse = await axios.post('/api/audio/narrate', {
+            const audioResponse = await apiInstance.post('/api/audio/narrate', {
               storyId: generatedStory.id,
               storyText: generatedStory.content,
               voice: formData.audioSettings.voiceType,
@@ -222,7 +222,7 @@ const StoryCreator: React.FC = () => {
 
         // Generate images for the story
         try {
-          const imageResponse = await axios.post('/api/images/generate', {
+          const imageResponse = await apiInstance.post('/api/images/generate', {
             prompt: `${generatedStory.title} - ${formData.prompt}`,
             style: 'storybook',
             storyId: generatedStory.id,
@@ -288,7 +288,7 @@ const StoryCreator: React.FC = () => {
     
     try {
       // Generate storybook directly from prompt
-      const response = await axios.post('/api/storybooks/create-from-prompt', {
+      const response = await apiInstance.post('/api/storybooks/create-from-prompt', {
         prompt: formData.prompt,
         genre: formData.genre,
         length: formData.length,
