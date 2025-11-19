@@ -5,10 +5,10 @@
 
 // Common API key validation patterns
 const API_KEY_PATTERNS = {
-  openai: /^sk-[a-zA-Z0-9]{48}$/,
+  openai: /^sk-[a-zA-Z0-9-]+$/,
   huggingface: /^hf_[a-zA-Z0-9]{32,}$/,
   google: /^AIza[0-9A-Za-z_-]{35}$/,
-  elevenlabs: /^[0-9a-f]{32}$/,
+  elevenlabs: /^sk_[a-zA-Z0-9-]+$/,
   stability: /^sk-[a-zA-Z0-9]{40,}$/
 };
 
@@ -94,6 +94,16 @@ function validateGoogleAIKey(apiKey) {
 }
 
 /**
+ * Validate ElevenLabs API key
+ * @param {string} apiKey - The ElevenLabs API key
+ * @returns {boolean} - Whether the key is valid
+ */
+function validateElevenLabsKey(apiKey) {
+  const result = validateApiKey(apiKey, 'elevenlabs');
+  return result.isValid;
+}
+
+/**
  * Check if a service is properly configured with valid API key
  * @param {string} provider - Provider name
  * @returns {Object} - Configuration status
@@ -161,8 +171,9 @@ function maskApiKey(apiKey) {
 module.exports = {
   validateApiKey,
   validateOpenAIKey,
-  validateHuggingFaceKey, 
+  validateHuggingFaceKey,
   validateGoogleAIKey,
+  validateElevenLabsKey,
   isServiceConfigured,
   getServicesStatus,
   maskApiKey,

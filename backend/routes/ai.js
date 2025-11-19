@@ -239,10 +239,10 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
   const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in ${genre} genre. Prompt: "${prompt}". Create an engaging narrative with rich descriptions and compelling characters. Make it family-friendly and well-structured.`;
   
   try {
-    console.log('🔄 Using Google AI with model: gemini-1.5-flash');
+    console.log('🔄 Using Google AI with model: gemini-1.5-pro');
     // Updated endpoint with current supported model
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
       {
         contents: [
           {
@@ -437,7 +437,7 @@ Make the enhanced prompt detailed enough to guide the creation of a compelling $
       
     case 'google':
       const googleResponse = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
         {
           contents: [{ parts: [{ text: enhancementPrompt }] }],
           generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
@@ -603,7 +603,7 @@ router.get('/providers', (req, res) => {
       responseTime: googleStatus.configured ? 1500 : null,
       errorRate: 0.05,
       status: googleStatus.configured ? 'healthy' : 'unhealthy',
-      message: googleStatus.configured ? 'Ready (gemini-1.5-flash)' : googleStatus.reason,
+      message: googleStatus.configured ? 'Ready (gemini-1.5-pro)' : googleStatus.reason,
       maskedKey: googleStatus.configured ? `AIza****${process.env.GOOGLE_AI_API_KEY?.slice(-4)}` : null
     }
   ];
