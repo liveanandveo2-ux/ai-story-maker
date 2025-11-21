@@ -194,9 +194,9 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
   const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in the ${genre} genre based on this prompt: "${prompt}". Create an engaging narrative with vivid descriptions and compelling characters.`;
   
   try {
-    console.log('🔄 Using HuggingFace inference API with model: microsoft/DialoGPT-large');
+    console.log('🔄 Using HuggingFace inference API with model: gpt2');
     const response = await axios.post(
-      'https://router.huggingface.co/microsoft/DialoGPT-large',
+      'https://api-inference.huggingface.co/models/gpt2',
       {
         inputs: systemPrompt,
         parameters: {
@@ -436,7 +436,7 @@ Make the enhanced prompt detailed enough to guide the creation of a compelling $
     case 'huggingface':
       const cleanedHfKey = cleanApiKey(apiKey);
       const hfResponse = await axios.post(
-        'https://api-inference.huggingface.co/models/microsoft/DialoGPT-large',
+        'https://api-inference.huggingface.co/models/google/flan-t5-large',
         { inputs: enhancementPrompt },
         {
           headers: {
