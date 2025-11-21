@@ -5,11 +5,11 @@
 
 // Common API key validation patterns
 const API_KEY_PATTERNS = {
-  openai: /^sk-[a-zA-Z0-9-]+$/,
-  huggingface: /^hf_[a-zA-Z0-9]{32,}$/,
+  openai: /^sk-[a-zA-Z0-9_-]+$/,
+  huggingface: /^hf_[a-zA-Z0-9_-]{32,}$/,
   google: /^AIza[0-9A-Za-z_-]{35}$/,
-  elevenlabs: /^sk_[a-zA-Z0-9-]+$/,
-  stability: /^sk-[a-zA-Z0-9]{40,}$/
+  elevenlabs: /^sk_[a-zA-Z0-9_-]+$/,
+  stability: /^sk-[a-zA-Z0-9_-]{40,}$/
 };
 
 /**

@@ -235,7 +235,7 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
 async function generateWithGoogleAI(prompt, genre, length, apiKey) {
   // Clean the API key before validation and use
   const cleanedKey = cleanApiKey(apiKey);
-  
+
   if (!validateGoogleAIKey(cleanedKey)) {
     throw new Error('Invalid Google AI API key format');
   }
@@ -246,14 +246,14 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
     long: 3500,
     'very long': 5500
   };
-  
+
   const systemPrompt = `Write a ${length} story (${targetWords[length]} words) in ${genre} genre. Prompt: "${prompt}". Create an engaging narrative with rich descriptions and compelling characters. Make it family-friendly and well-structured.`;
-  
+
   try {
-    console.log('🔄 Using Google AI with model: gemini-1.5-pro');
-    // Updated endpoint with current supported model
+    console.log('🔄 Using Google AI with model: gemini-1.5-flash');
+    // Updated to use the correct model and API version
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${cleanedKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanedKey}`,
       {
         contents: [
           {
@@ -292,18 +292,18 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
         timeout: 30000
       }
     );
-    
+
     // Handle response safely
     const candidates = response.data?.candidates || [];
     if (!candidates.length || !candidates[0]?.content?.parts?.length) {
       throw new Error('Google AI returned empty or malformed response');
     }
-    
+
     const result = candidates[0].content.parts[0].text || '';
     if (!result || result.length < 50) {
       throw new Error('Google AI returned insufficient content');
     }
-    
+
     console.log('✅ Google AI generation successful');
     return result;
   } catch (error) {
@@ -616,7 +616,7 @@ router.get('/providers', (req, res) => {
       responseTime: googleStatus.configured ? 1500 : null,
       errorRate: 0.05,
       status: googleStatus.configured ? 'healthy' : 'unhealthy',
-      message: googleStatus.configured ? 'Ready (gemini-1.5-pro)' : googleStatus.reason,
+      message: googleStatus.configured ? 'Ready (gemini-1.5-flash)' : googleStatus.reason,
       maskedKey: googleStatus.configured ? `AIza****${process.env.GOOGLE_AI_API_KEY?.slice(-4)}` : null
     }
   ];

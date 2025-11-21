@@ -332,7 +332,7 @@ function mapVoiceType(voiceType) {
   return voiceMap[voiceType] || 'alloy';
 }
 
-// POST /api/audio/narrate - Generate narration for a story with enhanced error handling
+// POST /api/audio/narrate - Generate narration for a story with enhanced error handling and chunking
 router.post('/narrate', async (req, res) => {
   try {
     const { storyId, storyText, voice = 'alloy', speed = 1.0 } = req.body;
@@ -341,19 +341,19 @@ router.post('/narrate', async (req, res) => {
       return res.status(400).json({ error: 'Story text is required' });
     }
 
-    if (storyText.length > 16000) {
-      return res.status(400).json({ 
-        error: 'Story text too long for narration',
-        maxLength: 16000,
-        currentLength: storyText.length,
-        suggestion: 'Consider breaking the story into smaller segments'
-      });
-    }
-
     console.log(`Generating narration for story: ${storyId || 'unnamed'} (${storyText.length} chars)`);
 
     // Clean and prepare story text for narration
     const cleanText = cleanTextForNarration(storyText);
+
+    // Check if text is too long and needs chunking
+    const maxChunkLength = 4000; // Conservative limit for TTS APIs
+    const needsChunking = cleanText.length > maxChunkLength;
+
+    if (needsChunking) {
+      console.log(`Text too long (${cleanText.length} chars), using chunked narration`);
+      return await generateChunkedNarration(storyId, cleanText, voice, speed, res);
+    }
 
     try {
       // Generate audio using OpenAI TTS (preferred for narration)
@@ -386,7 +386,8 @@ router.post('/narrate', async (req, res) => {
             estimatedDuration: estimatedDuration,
             fileSize: audioBuffer.length,
             characterCount: cleanText.length,
-            quality: 'hd'
+            quality: 'hd',
+            chunked: false
           }
         });
       }
@@ -399,7 +400,8 @@ router.post('/narrate', async (req, res) => {
           message: 'Story narration generated successfully using ElevenLabs TTS',
           data: {
             ...result.data,
-            storyId: storyId
+            storyId: storyId,
+            chunked: false
           }
         });
       }
@@ -420,6 +422,134 @@ router.post('/narrate', async (req, res) => {
     });
   }
 });
+
+// Generate chunked narration for long stories
+async function generateChunkedNarration(storyId, text, voice, speed, res) {
+  const chunks = splitTextIntoChunks(text, 4000);
+  console.log(`Splitting narration into ${chunks.length} chunks`);
+
+  const audioBuffers = [];
+  let totalDuration = 0;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunk.length} chars)`);
+
+    try {
+      let audioBuffer;
+
+      if (openai) {
+        const audioResponse = await openai.audio.speech.create({
+          model: 'tts-1-hd',
+          voice: mapVoiceType(voice),
+          input: chunk,
+          speed: Math.max(0.25, Math.min(4.0, speed))
+        });
+        audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+      } else if (process.env.ELEVENLABS_API_KEY) {
+        const result = await generateWithElevenLabs(chunk, voice);
+        // For ElevenLabs, we need to download the audio
+        const audioResponse = await axios.get(result.data.audioUrl, {
+          responseType: 'arraybuffer'
+        });
+        audioBuffer = Buffer.from(audioResponse.data);
+      } else {
+        throw new Error('No TTS service available');
+      }
+
+      audioBuffers.push(audioBuffer);
+      totalDuration += Math.ceil(chunk.length / 150);
+
+    } catch (chunkError) {
+      console.error(`Failed to generate audio for chunk ${i + 1}:`, chunkError);
+      // Continue with other chunks, but log the error
+    }
+  }
+
+  if (audioBuffers.length === 0) {
+    throw new Error('Failed to generate audio for any chunks');
+  }
+
+  // Combine audio buffers (simple concatenation - in production, you'd want proper audio merging)
+  const combinedBuffer = Buffer.concat(audioBuffers);
+  const audioFilename = `narration-chunked-${storyId || Date.now()}.mp3`;
+  const audioPath = path.join(audioDir, audioFilename);
+
+  fs.writeFileSync(audioPath, combinedBuffer);
+
+  return res.json({
+    success: true,
+    message: `Story narration generated successfully using chunked TTS (${audioBuffers.length} chunks)`,
+    data: {
+      audioUrl: `/api/audio/${audioFilename}`,
+      filename: audioFilename,
+      storyId: storyId,
+      voice: voice,
+      speed: speed,
+      estimatedDuration: totalDuration,
+      fileSize: combinedBuffer.length,
+      characterCount: text.length,
+      quality: 'hd',
+      chunked: true,
+      chunksProcessed: audioBuffers.length,
+      totalChunks: chunks.length
+    }
+  });
+}
+
+// Split text into chunks at sentence boundaries
+function splitTextIntoChunks(text, maxLength) {
+  const chunks = [];
+  let currentChunk = '';
+
+  // Split by sentences (basic approach)
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+
+  for (const sentence of sentences) {
+    const trimmedSentence = sentence.trim();
+    if (!trimmedSentence) continue;
+
+    // If adding this sentence would exceed the limit, save current chunk
+    if (currentChunk.length + trimmedSentence.length + 1 > maxLength && currentChunk.length > 0) {
+      chunks.push(currentChunk.trim());
+      currentChunk = trimmedSentence;
+    } else {
+      currentChunk += (currentChunk ? '. ' : '') + trimmedSentence;
+    }
+  }
+
+  // Add remaining chunk
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  // If we still have very long chunks, split them by words
+  const finalChunks = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= maxLength) {
+      finalChunks.push(chunk);
+    } else {
+      // Split long chunks by words
+      const words = chunk.split(' ');
+      let wordChunk = '';
+
+      for (const word of words) {
+        if (wordChunk.length + word.length + 1 > maxLength && wordChunk.length > 0) {
+          finalChunks.push(wordChunk.trim());
+          wordChunk = word;
+        } else {
+          wordChunk += (wordChunk ? ' ' : '') + word;
+        }
+      }
+
+      if (wordChunk.trim()) {
+        finalChunks.push(wordChunk.trim());
+      }
+    }
+  }
+
+  return finalChunks.filter(chunk => chunk.length > 0);
+}
 
 // Clean text for better narration with enhanced processing
 function cleanTextForNarration(text) {
