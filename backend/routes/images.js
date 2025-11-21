@@ -3,19 +3,24 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const OpenAI = require('openai');
-const { validateOpenAIKey, validateHuggingFaceKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
+const { validateOpenAIKey, validateHuggingFaceKey, isServiceConfigured, maskApiKey, cleanApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
-// Initialize OpenAI client
+// Initialize OpenAI client with cleaned API key
 let openai = null;
 const openaiKey = process.env.OPENAI_API_KEY;
-if (openaiKey && validateOpenAIKey(openaiKey)) {
-  openai = new OpenAI({
-    apiKey: openaiKey,
-  });
-  console.log('✅ OpenAI DALL-E client initialized successfully');
+if (openaiKey) {
+  const cleanedKey = cleanApiKey(openaiKey);
+  if (validateOpenAIKey(cleanedKey)) {
+    openai = new OpenAI({
+      apiKey: cleanedKey,
+    });
+    console.log('✅ OpenAI DALL-E client initialized successfully');
+  } else {
+    console.log('⚠️  OpenAI API key invalid or not provided for DALL-E');
+  }
 } else {
-  console.log('⚠️  OpenAI API key invalid or not provided for DALL-E');
+  console.log('⚠️  OpenAI API key not provided for DALL-E');
 }
 
 // Ensure images directory exists
@@ -214,6 +219,9 @@ async function generateWithDALLE(prompt, style, size) {
 
 // Stability AI integration
 async function generateWithStability(prompt, style) {
+  // Clean the API key before use
+  const cleanedKey = cleanApiKey(process.env.STABILITY_API_KEY);
+  
   const stylePrompts = {
     storybook: "illustrated children's book style, colorful, whimsical",
     watercolor: "watercolor painting style, soft, artistic",
@@ -242,7 +250,7 @@ async function generateWithStability(prompt, style) {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': `Bearer ${process.env.STABILITY_API_KEY}`
+        'Authorization': `Bearer ${cleanedKey}`
       }
     }
   );
@@ -253,7 +261,10 @@ async function generateWithStability(prompt, style) {
 
 // Hugging Face integration
 async function generateWithHuggingFace(prompt, style) {
-  if (!validateHuggingFaceKey(process.env.HUGGINGFACE_API_KEY)) {
+  // Clean the API key before validation and use
+  const cleanedKey = cleanApiKey(process.env.HUGGINGFACE_API_KEY);
+  
+  if (!validateHuggingFaceKey(cleanedKey)) {
     throw new Error('Invalid HuggingFace API key format');
   }
 
@@ -279,7 +290,7 @@ async function generateWithHuggingFace(prompt, style) {
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Authorization': `Bearer ${cleanedKey}`,
           'Content-Type': 'application/json'
         },
         responseType: 'arraybuffer',

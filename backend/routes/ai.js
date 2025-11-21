@@ -1,19 +1,24 @@
 const express = require('express');
 const axios = require('axios');
 const OpenAI = require('openai');
-const { validateOpenAIKey, validateHuggingFaceKey, validateGoogleAIKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
+const { validateOpenAIKey, validateHuggingFaceKey, validateGoogleAIKey, isServiceConfigured, maskApiKey, cleanApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
-// Initialize OpenAI client
+// Initialize OpenAI client with cleaned API key
 let openai = null;
 const openaiKey = process.env.OPENAI_API_KEY;
-if (openaiKey && validateOpenAIKey(openaiKey)) {
-  openai = new OpenAI({
-    apiKey: openaiKey,
-  });
-  console.log('✅ OpenAI client initialized successfully');
+if (openaiKey) {
+  const cleanedKey = cleanApiKey(openaiKey);
+  if (validateOpenAIKey(cleanedKey)) {
+    openai = new OpenAI({
+      apiKey: cleanedKey,
+    });
+    console.log('✅ OpenAI client initialized successfully');
+  } else {
+    console.log('⚠️  OpenAI API key invalid or not provided');
+  }
 } else {
-  console.log('⚠️  OpenAI API key invalid or not provided');
+  console.log('⚠️  OpenAI API key not provided');
 }
 
 // AI Story Generation with Multi-Provider Failover
@@ -172,7 +177,10 @@ Please write the complete story now:`;
 
 // Hugging Face integration (Secondary)
 async function generateWithHuggingFace(prompt, genre, length, apiKey) {
-  if (!validateHuggingFaceKey(apiKey)) {
+  // Clean the API key before validation and use
+  const cleanedKey = cleanApiKey(apiKey);
+  
+  if (!validateHuggingFaceKey(cleanedKey)) {
     throw new Error('Invalid HuggingFace API key format');
   }
 
@@ -202,7 +210,7 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
       },
       {
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${cleanedKey}`,
           'Content-Type': 'application/json'
         },
         timeout: 30000
@@ -225,7 +233,10 @@ async function generateWithHuggingFace(prompt, genre, length, apiKey) {
 
 // Google AI integration (Tertiary)
 async function generateWithGoogleAI(prompt, genre, length, apiKey) {
-  if (!validateGoogleAIKey(apiKey)) {
+  // Clean the API key before validation and use
+  const cleanedKey = cleanApiKey(apiKey);
+  
+  if (!validateGoogleAIKey(cleanedKey)) {
     throw new Error('Invalid Google AI API key format');
   }
 
@@ -242,7 +253,7 @@ async function generateWithGoogleAI(prompt, genre, length, apiKey) {
     console.log('🔄 Using Google AI with model: gemini-1.5-pro');
     // Updated endpoint with current supported model
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${cleanedKey}`,
       {
         contents: [
           {
@@ -423,11 +434,12 @@ Make the enhanced prompt detailed enough to guide the creation of a compelling $
       return completion.choices[0]?.message?.content?.trim() || '';
       
     case 'huggingface':
+      const cleanedHfKey = cleanApiKey(apiKey);
       const hfResponse = await axios.post(
         'https://router.huggingface.co/microsoft/DialoGPT-large',
         { inputs: enhancementPrompt },
         {
-          headers: { 'Authorization': `Bearer ${apiKey}` },
+          headers: { 'Authorization': `Bearer ${cleanedHfKey}` },
           timeout: 15000
         }
       );
@@ -436,8 +448,9 @@ Make the enhanced prompt detailed enough to guide the creation of a compelling $
       return result.replace(/^.*?:/, '').trim() || '';
       
     case 'google':
+      const cleanedGoogleKey = cleanApiKey(apiKey);
       const googleResponse = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${cleanedGoogleKey}`,
         {
           contents: [{ parts: [{ text: enhancementPrompt }] }],
           generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }

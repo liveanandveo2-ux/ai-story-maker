@@ -3,19 +3,24 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const OpenAI = require('openai');
-const { validateOpenAIKey, isServiceConfigured, maskApiKey } = require('../utils/apiValidators');
+const { validateOpenAIKey, isServiceConfigured, maskApiKey, cleanApiKey } = require('../utils/apiValidators');
 const router = express.Router();
 
-// Initialize OpenAI client
+// Initialize OpenAI client with cleaned API key
 let openai = null;
 const openaiKey = process.env.OPENAI_API_KEY;
-if (openaiKey && validateOpenAIKey(openaiKey)) {
-  openai = new OpenAI({
-    apiKey: openaiKey,
-  });
-  console.log('✅ OpenAI TTS client initialized successfully');
+if (openaiKey) {
+  const cleanedKey = cleanApiKey(openaiKey);
+  if (validateOpenAIKey(cleanedKey)) {
+    openai = new OpenAI({
+      apiKey: cleanedKey,
+    });
+    console.log('✅ OpenAI TTS client initialized successfully');
+  } else {
+    console.log('⚠️  OpenAI API key invalid or not provided for TTS');
+  }
 } else {
-  console.log('⚠️  OpenAI API key invalid or not provided for TTS');
+  console.log('⚠️  OpenAI API key not provided for TTS');
 }
 
 // Ensure audio directory exists
@@ -233,12 +238,10 @@ async function generateWithElevenLabs(text, voice) {
     throw new Error('ElevenLabs API key not configured');
   }
 
-  // Clean the API key - remove any whitespace, \r\n, or extra characters
-  const cleanApiKey = process.env.ELEVENLABS_API_KEY
-    .replace(/[\r\n\s]+$/g, '')  // Remove carriage return, line feed, and trailing whitespace
-    .trim();
+  // Clean the API key using the utility function
+  const cleanedKey = cleanApiKey(process.env.ELEVENLABS_API_KEY);
 
-  if (!cleanApiKey) {
+  if (!cleanedKey) {
     throw new Error('ElevenLabs API key is empty after cleaning');
   }
 
@@ -270,7 +273,7 @@ async function generateWithElevenLabs(text, voice) {
         headers: {
           'Accept': 'audio/mpeg',
           'Content-Type': 'application/json',
-          'xi-api-key': cleanApiKey
+          'xi-api-key': cleanedKey
         },
         responseType: 'arraybuffer',
         timeout: 30000
