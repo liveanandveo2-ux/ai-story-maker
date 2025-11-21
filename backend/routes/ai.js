@@ -436,28 +436,31 @@ Make the enhanced prompt detailed enough to guide the creation of a compelling $
     case 'huggingface':
       const cleanedHfKey = cleanApiKey(apiKey);
       const hfResponse = await axios.post(
-        'https://router.huggingface.co/microsoft/DialoGPT-large',
+        'https://api-inference.huggingface.co/models/microsoft/DialoGPT-large',
         { inputs: enhancementPrompt },
         {
-          headers: { 'Authorization': `Bearer ${cleanedHfKey}` },
+          headers: {
+            'Authorization': `Bearer ${cleanedHfKey}`,
+            'Content-Type': 'application/json'
+          },
           timeout: 15000
         }
       );
-      
+
       const result = hfResponse.data[0]?.generated_text || hfResponse.data?.generated_text || '';
       return result.replace(/^.*?:/, '').trim() || '';
-      
+
     case 'google':
       const cleanedGoogleKey = cleanApiKey(apiKey);
       const googleResponse = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${cleanedGoogleKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${cleanedGoogleKey}`,
         {
           contents: [{ parts: [{ text: enhancementPrompt }] }],
           generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
         },
         { headers: { 'Content-Type': 'application/json' }, timeout: 15000 }
       );
-      
+
       const candidates = googleResponse.data?.candidates || [];
       return candidates[0]?.content?.parts?.[0]?.text || '';
       
